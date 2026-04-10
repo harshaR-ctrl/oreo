@@ -2,11 +2,13 @@
 player.py — Player controller with kinematic movement.
 
 Implements variable jump height, coyote time, jump buffering,
-and momentum-based dash. Uses Vector2 for all movement math.
+momentum-based dash, lives system, state-driven powerup manager,
+and weapon strategy pattern. Uses Vector2 for all movement math.
 """
 
 from __future__ import annotations
 import math
+import random
 import pygame
 from settings import (
     PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_SPAWN_X, PLAYER_SPAWN_Y,
@@ -15,7 +17,13 @@ from settings import (
     DASH_SPEED, MOMENTUM_FACTOR, DASH_COOLDOWN, DASH_DURATION,
     COYOTE_FRAMES, JUMP_BUFFER_FRAMES,
     COL_PLAYER_BODY, COL_PLAYER_OUTLINE, COL_PLAYER_DASH, COL_PLAYER_EYE,
+    COL_SHIELD_RING,
     FPS, PLAYER_SHOOT_COOLDOWN,
+    MAX_LIVES, DAMAGE_INVINCIBILITY, MAX_RUN_SPEED,
+    WEAPON_TYPES, WEAPON_ORDER,
+    POWERUP_DASH_DURATION, POWERUP_MAGNET_DURATION,
+    POWERUP_SHIELD_DURATION, POWERUP_BLACKHOLE_DURATION,
+    POWERUP_VOID_DURATION,
 )
 from input_handler import InputHandler
 from physics import PhysicsEngine
@@ -29,6 +37,16 @@ class PlayerState:
     JUMPING = "jumping"
     FALLING = "falling"
     DASHING = "dashing"
+
+
+# ─── Duration lookup for activate_powerup convenience ─────────────────
+_POWERUP_DURATIONS: dict[str, int] = {
+    "dash":      POWERUP_DASH_DURATION,
+    "magnet":    POWERUP_MAGNET_DURATION,
+    "shield":    POWERUP_SHIELD_DURATION,
+    "blackhole": POWERUP_BLACKHOLE_DURATION,
+    "void":      POWERUP_VOID_DURATION,
+}
 
 
 class Player:
@@ -49,6 +67,12 @@ class Player:
         self.facing: float = 1.0  # 1.0 = right, -1.0 = left
         self.alive: bool = True
 
+        # ── Lives system ─────────────────────────────────────────
+        self.lives: int = MAX_LIVES
+        self.max_lives: int = MAX_LIVES
+        self.invincible: bool = False
+        self.invincible_timer: float = 0.0
+
         # Jump mechanics
         self.coyote_counter: int = 0
         self.jump_buffer_counter: int = 0
@@ -63,9 +87,16 @@ class Player:
         self.can_dash: bool = True  # Reset on landing
         self.dash_ghost_timer: float = 0.0
 
-        # Shooting
-        self.can_shoot: bool = False
-        self.shoot_cooldown_timer: float = 0.0
+        # ── PowerUp Manager (non-blocking, tick-based) ───────────
+        self.active_powerups: dict[str, int] = {}  # type → expiry tick (ms)
+        self.speed_multiplier: float = 1.0
+        self.shield_active: bool = False
+
+        # ── Weapon Strategy Pattern ──────────────────────────────
+        self.can_shoot: bool = True   # Start with pistol available
+        self.current_weapon: str = "pistol"
+        self.unlocked_weapons: list[str] = ["pistol"]
+        self.weapon_cooldown_tick: int = 0  # expiry tick for weapon cooldown
 
         # Visual
         self.squash_stretch: float = 1.0  # 1.0 = normal, <1 = squash, >1 = stretch
@@ -87,6 +118,13 @@ class Player:
     def center_y(self) -> float:
         return self.position.y + self.height / 2
 
+    @property
+    def shield_rect(self) -> pygame.Rect:
+        """Collision rect for the shield bubble (slightly larger than player)."""
+        shield_r = 12
+        cx, cy = int(self.center_x), int(self.center_y)
+        return pygame.Rect(cx - shield_r, cy - shield_r, shield_r * 2, shield_r * 2)
+
     def reset(self, x: float = PLAYER_SPAWN_X, y: float = PLAYER_SPAWN_Y) -> None:
         """Reset player to spawn position."""
         self.position.x = x
@@ -96,6 +134,9 @@ class Player:
         self.state = PlayerState.IDLE
         self.on_ground = False
         self.alive = True
+        self.lives = MAX_LIVES
+        self.invincible = False
+        self.invincible_timer = 0.0
         self.coyote_counter = 0
         self.jump_buffer_counter = 0
         self.jump_hold_timer = 0.0
@@ -104,15 +145,131 @@ class Player:
         self.dash_timer = 0.0
         self.is_dashing = False
         self.can_dash = True
-        self.can_shoot = False
-        self.shoot_cooldown_timer = 0.0
+        self.can_shoot = True
+        self.current_weapon = "pistol"
+        self.unlocked_weapons = ["pistol"]
+        self.weapon_cooldown_tick = 0
+        self.active_powerups.clear()
+        self.speed_multiplier = 1.0
+        self.shield_active = False
         self.squash_stretch = 1.0
+
+    # ── Lives & Damage ───────────────────────────────────────────────
+
+    def take_damage(self) -> bool:
+        """Reduce lives by 1, start i-frames. Returns True if player died."""
+        if self.invincible:
+            return False
+        self.lives -= 1
+        if self.lives <= 0:
+            self.alive = False
+            return True
+        # Grant invincibility frames
+        self.invincible = True
+        self.invincible_timer = DAMAGE_INVINCIBILITY
+        return False
+
+    # ── PowerUp Manager ──────────────────────────────────────────────
+
+    def activate_powerup(self, ptype: str, duration_ms: int | None = None) -> None:
+        """Activate a timed powerup. Uses default duration if none given."""
+        if duration_ms is None:
+            duration_ms = _POWERUP_DURATIONS.get(ptype, 5000)
+        self.active_powerups[ptype] = pygame.time.get_ticks() + duration_ms
+        self._apply_powerup_effect(ptype, active=True)
+
+    def _apply_powerup_effect(self, ptype: str, active: bool) -> None:
+        """Apply or remove the side-effect of a powerup."""
+        if ptype == "dash":
+            self.speed_multiplier = 2.0 if active else 1.0
+        elif ptype == "shield":
+            self.shield_active = active
+            self.invincible = active
+
+    def _update_powerups(self) -> None:
+        """Expire powerups whose ticks have passed."""
+        now = pygame.time.get_ticks()
+        expired = [k for k, v in self.active_powerups.items() if now > v]
+        for ptype in expired:
+            self._apply_powerup_effect(ptype, active=False)
+            del self.active_powerups[ptype]
+
+    def has_powerup(self, ptype: str) -> bool:
+        """Check if a powerup is currently active."""
+        return ptype in self.active_powerups
+
+    # ── Weapon Strategy ──────────────────────────────────────────────
+
+    def cycle_weapon(self) -> None:
+        """Advance to the next unlocked weapon."""
+        if len(self.unlocked_weapons) <= 1:
+            return
+        idx = self.unlocked_weapons.index(self.current_weapon)
+        self.current_weapon = self.unlocked_weapons[(idx + 1) % len(self.unlocked_weapons)]
+
+    def unlock_next_weapon(self) -> str:
+        """Unlock the next weapon in WEAPON_ORDER. Returns the newly unlocked name."""
+        for w in WEAPON_ORDER:
+            if w not in self.unlocked_weapons:
+                self.unlocked_weapons.append(w)
+                self.current_weapon = w
+                return w
+        # All unlocked — just cycle
+        self.cycle_weapon()
+        return self.current_weapon
+
+    def shoot(self, inp: InputHandler) -> list[dict]:
+        """Attempt to fire based on current weapon stats.
+
+        Returns a list of dicts with keys: x, y, facing, angle_offset
+        for each bullet to spawn. Empty list if on cooldown.
+        """
+        now = pygame.time.get_ticks()
+        stats = WEAPON_TYPES[self.current_weapon]
+
+        # Continuous weapons fire while held; others fire on press
+        if stats["is_continuous"]:
+            if not inp.shoot_held():
+                return []
+        else:
+            if not inp.shoot_pressed():
+                return []
+
+        # Cooldown check (tick-based)
+        if now < self.weapon_cooldown_tick:
+            return []
+
+        self.weapon_cooldown_tick = now + stats["cooldown"]
+
+        bullets: list[dict] = []
+        num = stats["bullets"]
+        spread = stats["spread"]
+
+        bx = self.center_x + self.facing * 6
+        by = self.center_y
+
+        if num == 1:
+            angle = random.uniform(-spread, spread) if spread > 0 else 0.0
+            bullets.append({"x": bx, "y": by, "facing": self.facing, "angle": angle})
+        else:
+            # Multi-bullet: evenly distribute across spread range
+            for i in range(num):
+                if num > 1:
+                    angle = -spread + (2 * spread * i / (num - 1))
+                else:
+                    angle = 0.0
+                bullets.append({"x": bx, "y": by, "facing": self.facing, "angle": angle})
+
+        return bullets
+
+    # ── Main update ──────────────────────────────────────────────────
 
     def update(self, inp: InputHandler, platforms: list, dt: float) -> dict:
         """Full player update: input → physics → collision → state.
-        
+
         Returns event dict with flags for sound/VFX triggers:
           - jumped, landed, dashed, died, wall_hit, wall_speed, shot
+          - weapon_switched, powerup_expired
         """
         events: dict = {
             "jumped": False,
@@ -122,12 +279,29 @@ class Player:
             "wall_hit": False,
             "wall_speed": 0.0,
             "shot": False,
+            "shot_bullets": [],       # list of bullet spawn dicts
+            "weapon_switched": False,
+            "is_laser": False,
         }
 
         if not self.alive:
             return events
 
         was_on_ground = self.on_ground
+
+        # ── Update powerups ──────────────────────────────────────
+        self._update_powerups()
+
+        # ── Update invincibility timer ───────────────────────────
+        if self.invincible and not self.shield_active:
+            self.invincible_timer -= dt
+            if self.invincible_timer <= 0:
+                self.invincible = False
+                self.invincible_timer = 0.0
+
+        # ── Effective speed ──────────────────────────────────────
+        effective_accel = ACCELERATION * self.speed_multiplier
+        effective_max_speed = MAX_RUN_SPEED * self.speed_multiplier
 
         # ── Dashing ──────────────────────────────────────────────
         self.dash_cooldown_timer = max(0, self.dash_cooldown_timer - dt)
@@ -164,7 +338,9 @@ class Player:
             self.facing = direction
         self.eye_target_x = direction
 
-        self.physics.apply_acceleration(self.velocity, direction, ACCELERATION, dt)
+        self.physics.apply_acceleration(self.velocity, direction, effective_accel, dt)
+        # Clamp to effective max speed
+        self.velocity.x = max(-effective_max_speed, min(effective_max_speed, self.velocity.x))
         self.physics.apply_friction(self.velocity, self.on_ground)
         self.physics.apply_gravity(self.velocity, dt, self.on_ground)
 
@@ -211,11 +387,19 @@ class Player:
             self._start_dash(inp)
             events["dashed"] = True
 
-        # ── Shooting ──────────────────────────────────────────────────
-        self.shoot_cooldown_timer = max(0, self.shoot_cooldown_timer - dt)
-        if inp.shoot_pressed() and self.can_shoot and self.shoot_cooldown_timer <= 0:
-            self.shoot_cooldown_timer = PLAYER_SHOOT_COOLDOWN
-            events["shot"] = True
+        # ── Weapon switch ────────────────────────────────────────
+        if inp.weapon_switch_pressed() and self.can_shoot:
+            self.cycle_weapon()
+            events["weapon_switched"] = True
+
+        # ── Shooting ─────────────────────────────────────────────
+        if self.can_shoot:
+            bullet_data = self.shoot(inp)
+            if bullet_data:
+                events["shot"] = True
+                events["shot_bullets"] = bullet_data
+                stats = WEAPON_TYPES[self.current_weapon]
+                events["is_laser"] = stats["is_continuous"]
 
         # ── Move and collide ─────────────────────────────────────
         collision = self.physics.move_and_collide(
@@ -292,9 +476,14 @@ class Player:
             self.state = PlayerState.IDLE
 
     def draw(self, surface: pygame.Surface, cam_x: float, cam_y: float) -> None:
-        """Draw the player character with squash/stretch and eyes."""
+        """Draw the player character with squash/stretch, eyes, and shield."""
         if not self.alive:
             return
+
+        # Invincibility flash: blink every 100ms during i-frames
+        if self.invincible and not self.shield_active:
+            if int(pygame.time.get_ticks() / 100) % 2 == 0:
+                return  # skip drawing this frame (blink)
 
         sx = int(self.position.x - cam_x)
         sy = int(self.position.y - cam_y)
@@ -310,6 +499,8 @@ class Player:
         # Choose color based on state
         if self.is_dashing:
             body_color = COL_PLAYER_DASH
+        elif self.has_powerup("dash"):
+            body_color = (255, 220, 100)  # golden tint during speed boost
         else:
             body_color = COL_PLAYER_BODY
 
@@ -334,3 +525,20 @@ class Player:
             surface, COL_PLAYER_EYE,
             (eye_base_x + eye_offset + 2, eye_y, eye_size, eye_size),
         )
+
+        # ── Shield visual ────────────────────────────────────────
+        if self.shield_active:
+            shield_r = 12
+            cx = sx + self.width // 2
+            cy = sy + self.height // 2
+            # Create alpha surface for semi-transparent shield
+            shield_surf = pygame.Surface((shield_r * 2 + 4, shield_r * 2 + 4), pygame.SRCALPHA)
+            pygame.draw.circle(
+                shield_surf, (*COL_SHIELD_RING, 50),
+                (shield_r + 2, shield_r + 2), shield_r,
+            )
+            pygame.draw.circle(
+                shield_surf, (*COL_SHIELD_RING, 120),
+                (shield_r + 2, shield_r + 2), shield_r, 1,
+            )
+            surface.blit(shield_surf, (cx - shield_r - 2, cy - shield_r - 2))

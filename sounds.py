@@ -120,6 +120,74 @@ def generate_level_complete_sound() -> pygame.mixer.Sound:
     return _make_sound(samples)
 
 
+def generate_powerup_sound() -> pygame.mixer.Sound:
+    """Bright ascending chime for powerup pickup."""
+    duration = 0.2
+    samples: list[int] = []
+    n = int(SAMPLE_RATE * duration)
+    for i in range(n):
+        t = i / SAMPLE_RATE
+        freq = 600 + 1200 * (t / duration)
+        env = 1.0 - (t / duration) ** 0.5
+        val = (_sine(t, freq) * 0.4 + _sine(t, freq * 1.5) * 0.15) * env * 0.3
+        samples.append(int(val * 32767))
+    return _make_sound(samples)
+
+
+def generate_damage_sound() -> pygame.mixer.Sound:
+    """Crunchy impact hit."""
+    duration = 0.15
+    samples: list[int] = []
+    n = int(SAMPLE_RATE * duration)
+    for i in range(n):
+        t = i / SAMPLE_RATE
+        freq = 200 - 100 * (t / duration)
+        env = 1.0 - (t / duration)
+        val = (_square(t, freq) * 0.3 + _noise() * 0.25) * env * 0.3
+        samples.append(int(val * 32767))
+    return _make_sound(samples)
+
+
+def generate_shield_hit_sound() -> pygame.mixer.Sound:
+    """Metallic ping when shield absorbs a hit."""
+    duration = 0.12
+    samples: list[int] = []
+    n = int(SAMPLE_RATE * duration)
+    for i in range(n):
+        t = i / SAMPLE_RATE
+        env = 1.0 - (t / duration)
+        val = (_sine(t, 1200) * 0.3 + _sine(t, 2400) * 0.15) * env * 0.25
+        samples.append(int(val * 32767))
+    return _make_sound(samples)
+
+
+def generate_weapon_switch_sound() -> pygame.mixer.Sound:
+    """Short click/snap for weapon cycling."""
+    duration = 0.05
+    samples: list[int] = []
+    n = int(SAMPLE_RATE * duration)
+    for i in range(n):
+        t = i / SAMPLE_RATE
+        env = 1.0 - (t / duration) ** 2
+        val = _noise() * 0.2 * env
+        samples.append(int(val * 32767))
+    return _make_sound(samples)
+
+
+def generate_wormhole_sound() -> pygame.mixer.Sound:
+    """Whoosh with reverb tail for teleportation."""
+    duration = 0.25
+    samples: list[int] = []
+    n = int(SAMPLE_RATE * duration)
+    for i in range(n):
+        t = i / SAMPLE_RATE
+        freq = 500 - 400 * (t / duration)
+        env = (1.0 - (t / duration)) ** 0.4
+        val = (_sine(t, freq) * 0.2 + _noise() * 0.15) * env * 0.3
+        samples.append(int(val * 32767))
+    return _make_sound(samples)
+
+
 class SoundManager:
     """Manages all game sounds."""
 
@@ -135,6 +203,11 @@ class SoundManager:
                 self.sounds["coin"] = generate_coin_sound()
                 self.sounds["death"] = generate_death_sound()
                 self.sounds["level_complete"] = generate_level_complete_sound()
+                self.sounds["powerup"] = generate_powerup_sound()
+                self.sounds["damage"] = generate_damage_sound()
+                self.sounds["shield_hit"] = generate_shield_hit_sound()
+                self.sounds["weapon_switch"] = generate_weapon_switch_sound()
+                self.sounds["wormhole"] = generate_wormhole_sound()
             except Exception:
                 self.enabled = False
 

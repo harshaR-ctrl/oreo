@@ -3,7 +3,8 @@ level.py — Procedural level generator.
 
 Creates platforms using a reachability-based algorithm: each new platform
 is placed within jump range of the previous one. Difficulty scales with
-level number. Includes coins and a goal platform at the top.
+level number. Includes coins, enemies, obstacles, weighted-random
+powerup loot, and a goal platform at the top.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from settings import (
 )
 from enemies import Dasher, Marksman, Hybrid
 from obstacles import Obstacle
-from powerups import GunPowerUp
+from powerups import BasePowerUp, spawn_random_loot
 
 
 class Platform:
@@ -97,8 +98,8 @@ class Coin:
     """A collectible coin on a platform."""
 
     def __init__(self, x: int, y: int) -> None:
-        self.x: int = x
-        self.y: int = y
+        self.x: float = float(x)
+        self.y: float = float(y)
         self.size: int = COIN_SIZE
         self.collected: bool = False
         self.bob_timer: float = random.uniform(0, math.pi * 2)
@@ -107,8 +108,8 @@ class Coin:
     def rect(self) -> pygame.Rect:
         """Collision rect for the coin."""
         return pygame.Rect(
-            self.x - self.size // 2,
-            self.y - self.size // 2 + int(math.sin(self.bob_timer) * 2),
+            int(self.x) - self.size // 2,
+            int(self.y) - self.size // 2 + int(math.sin(self.bob_timer) * 2),
             self.size, self.size,
         )
 
@@ -141,7 +142,7 @@ class LevelGenerator:
         self.coins: list[Coin] = []
         self.enemies: list = []          # Dasher, Marksman, Hybrid
         self.obstacles: list[Obstacle] = []
-        self.powerups: list[GunPowerUp] = []
+        self.powerups: list[BasePowerUp] = []
         self.goal_platform: Platform | None = None
         self.level_number: int = 0
         self.seed: int = 0
@@ -273,18 +274,15 @@ class LevelGenerator:
             oy = plat.rect.y - OBSTACLE_HEIGHT
             self.obstacles.append(Obstacle(ox, oy))
 
-        # ── Spawn one Gun/Milk power-up on an early-ish platform ─
-        # Pick a platform in the first half of the level
-        early_plats = [
-            p for p in eligible_plats
-            if p.rect.y > GROUND_Y - (GROUND_Y - goal_y) * 0.6
-            and p not in [remaining_plats[j] for j in range(num_obstacles) if j < len(remaining_plats)]
-        ]
-        if early_plats:
-            pu_plat = random.choice(early_plats)
-            px = pu_plat.rect.x + pu_plat.rect.width // 2
-            py = pu_plat.rect.y - 12
-            self.powerups.append(GunPowerUp(px, py))
+        # ── Spawn weighted-random loot pickups ────────────────────
+        loot_plats = remaining_plats[num_obstacles:]
+        random.shuffle(loot_plats)
+        num_loot = min(len(loot_plats), 2 + int(difficulty * 2))
+        for i in range(num_loot):
+            plat = loot_plats[i]
+            px = plat.rect.x + plat.rect.width // 2
+            py = plat.rect.y - 12
+            self.powerups.append(spawn_random_loot(px, py))
 
     def update(self, dt: float) -> None:
         """Update all platforms, coins, and powerups."""

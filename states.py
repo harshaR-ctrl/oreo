@@ -2,7 +2,8 @@
 states.py — Game state machine: Menu, Playing, GameOver.
 
 Each state implements enter(), exit(), update(dt), and render(surface).
-The PlayingState orchestrates all game systems.
+The PlayingState orchestrates all game systems including the powerup
+manager, weapon strategy, lives/damage, and shield mechanics.
 """
 
 from __future__ import annotations
@@ -14,6 +15,11 @@ from settings import (
     COL_TEXT, COL_TEXT_DIM, COL_TEXT_ACCENT, COL_PLAYER_BODY,
     COL_BG, COIN_SCORE, LEVEL_COMPLETE_BONUS,
     PLAYER_SPAWN_X, PLAYER_SPAWN_Y,
+    MAGNET_RANGE, MAGNET_FORCE,
+    WORMHOLE_TILES, TILE_SIZE,
+    POWERUP_DASH_DURATION, POWERUP_MAGNET_DURATION,
+    POWERUP_SHIELD_DURATION, POWERUP_BLACKHOLE_DURATION,
+    POWERUP_VOID_DURATION,
 )
 from input_handler import InputHandler
 from physics import PhysicsEngine
@@ -23,7 +29,7 @@ from player import Player
 from level import LevelGenerator
 from hud import HUD
 from sounds import SoundManager
-from projectiles import Projectile, PlayerBullet
+from projectiles import Projectile, PlayerBullet, FriendlyBullet, LaserBeam
 from enemies import Dasher, Marksman, Hybrid
 
 
@@ -113,7 +119,7 @@ class MenuState(GameState):
 
         # Controls hint
         controls = self.hint_font.render(
-            "←→ / AD Move  SPACE Jump  SHIFT Dash  F Shoot", True, COL_TEXT_DIM
+            "←→ / AD Move  SPACE Jump  SHIFT Dash  F Shoot  Q Weapon", True, COL_TEXT_DIM
         )
         surface.blit(
             controls,
@@ -155,7 +161,8 @@ class PlayingState(GameState):
 
         # Projectile groups
         self.enemy_projectiles: list[Projectile] = []
-        self.player_bullets: list[PlayerBullet] = []
+        self.player_bullets: list[PlayerBullet | FriendlyBullet] = []
+        self.laser_beam: LaserBeam | None = None
 
     def enter(self) -> None:
         self.score = 0
@@ -172,6 +179,7 @@ class PlayingState(GameState):
         self.death_timer = 0.0
         self.enemy_projectiles.clear()
         self.player_bullets.clear()
+        self.laser_beam = None
 
     def update(self, inp: InputHandler, dt: float) -> str | None:
         # ── Death state ──────────────────────────────────────────
@@ -202,15 +210,40 @@ class PlayingState(GameState):
             self.camera.add_trauma(0.8)
         if events["wall_hit"] and events["wall_speed"] > 120:
             self.camera.add_trauma(events["wall_speed"] / 500.0)
+        if events["weapon_switched"]:
+            self.sound.play("weapon_switch")
 
-        # ── Player shooting → spawn bullet ─────────────────────
+        # ── Player shooting → spawn bullets ─────────────────────
+        self.laser_beam = None  # clear previous frame's laser
         if events["shot"]:
-            bullet = PlayerBullet(
-                self.player.center_x + self.player.facing * 6,
-                self.player.center_y,
-                self.player.facing,
-            )
-            self.player_bullets.append(bullet)
+            if events["is_laser"]:
+                # Laser: hitscan beam
+                start = pygame.Vector2(
+                    self.player.center_x + self.player.facing * 6,
+                    self.player.center_y,
+                )
+                beam = LaserBeam(start, self.player.facing)
+                beam.clip_to_platforms(active_platforms, self.level.obstacles)
+                self.laser_beam = beam
+
+                # Check laser ↔ enemies
+                for enemy in self.level.enemies:
+                    if not enemy.alive:
+                        continue
+                    if beam.rect.colliderect(enemy.rect):
+                        enemy.alive = False
+                        self.particles.emit_death_burst(
+                            enemy.position.x + enemy.rect.width / 2,
+                            enemy.position.y + enemy.rect.height / 2,
+                        )
+                        self.score += 200
+            else:
+                for b_data in events["shot_bullets"]:
+                    bullet = PlayerBullet(
+                        b_data["x"], b_data["y"],
+                        b_data["facing"], b_data["angle"],
+                    )
+                    self.player_bullets.append(bullet)
 
         # ── Update enemies ───────────────────────────────────
         player_pos = pygame.Vector2(self.player.center_x, self.player.center_y)
@@ -261,17 +294,47 @@ class PlayingState(GameState):
         # ── Collision: enemy projectiles ↔ player ─────────────
         if self.player.alive:
             player_rect = self.player.rect
-            for proj in self.enemy_projectiles:
+            shield_rect = self.player.shield_rect
+            has_blackhole = self.player.has_powerup("blackhole")
+            has_void = self.player.has_powerup("void")
+            has_shield = self.player.shield_active
+
+            for proj in self.enemy_projectiles[:]:
                 if not proj.alive:
                     continue
+
+                # ── Shield / Blackhole / Void interception ────
+                if (has_shield or has_blackhole or has_void) and shield_rect.colliderect(proj.rect):
+                    if has_void:
+                        # Reflect: spawn friendly bullet with reversed velocity
+                        reflected = FriendlyBullet(proj.position, proj.velocity)
+                        self.player_bullets.append(reflected)
+                        proj.alive = False
+                        self.sound.play("shield_hit")
+                    elif has_blackhole:
+                        # Absorb: just destroy the bullet
+                        proj.alive = False
+                        self.sound.play("shield_hit")
+                    elif has_shield:
+                        # Shield: destroy bullet, stay invincible
+                        proj.alive = False
+                        self.sound.play("shield_hit")
+                    continue
+
+                # Normal hit check
                 if player_rect.colliderect(proj.rect):
-                    self.player.alive = False
-                    events["died"] = True
-                    self.sound.play("death")
-                    self.camera.add_trauma(0.8)
-                    self.particles.emit_death_burst(
-                        self.player.center_x, self.player.center_y,
-                    )
+                    died = self.player.take_damage()
+                    if died:
+                        events["died"] = True
+                        self.sound.play("death")
+                        self.camera.add_trauma(0.8)
+                        self.particles.emit_death_burst(
+                            self.player.center_x, self.player.center_y,
+                        )
+                    else:
+                        self.sound.play("damage")
+                        self.camera.add_trauma(0.4)
+                    proj.alive = False
                     break
 
         # ── Collision: player body ↔ enemies ─────────────────
@@ -281,24 +344,110 @@ class PlayingState(GameState):
                 if not enemy.alive:
                     continue
                 if player_rect.colliderect(enemy.rect):
-                    self.player.alive = False
-                    events["died"] = True
-                    self.sound.play("death")
-                    self.camera.add_trauma(0.8)
-                    self.particles.emit_death_burst(
-                        self.player.center_x, self.player.center_y,
-                    )
+                    if self.player.shield_active:
+                        # Shield kills the enemy on contact
+                        enemy.alive = False
+                        self.particles.emit_death_burst(
+                            enemy.position.x + enemy.rect.width / 2,
+                            enemy.position.y + enemy.rect.height / 2,
+                        )
+                        self.score += 200
+                        self.sound.play("shield_hit")
+                    else:
+                        died = self.player.take_damage()
+                        if died:
+                            events["died"] = True
+                            self.sound.play("death")
+                            self.camera.add_trauma(0.8)
+                            self.particles.emit_death_burst(
+                                self.player.center_x, self.player.center_y,
+                            )
+                        else:
+                            self.sound.play("damage")
+                            self.camera.add_trauma(0.4)
                     break
+
+        # ── Magnet powerup — attract coins & uncollected pickups ─
+        if self.player.alive and self.player.has_powerup("magnet"):
+            magnet_pos = pygame.Vector2(self.player.center_x, self.player.center_y)
+
+            for coin in self.level.coins:
+                if coin.collected:
+                    continue
+                coin_pos = pygame.Vector2(coin.x, coin.y)
+                dist = magnet_pos.distance_to(coin_pos)
+                if dist < MAGNET_RANGE and dist > 1:
+                    direction = (magnet_pos - coin_pos).normalize() * MAGNET_FORCE
+                    coin.x += direction.x
+                    coin.y += direction.y
+
+            for pu in self.level.powerups:
+                if pu.collected:
+                    continue
+                pu_pos = pygame.Vector2(pu.x, pu.y)
+                dist = magnet_pos.distance_to(pu_pos)
+                if dist < MAGNET_RANGE and dist > 1:
+                    direction = (magnet_pos - pu_pos).normalize() * MAGNET_FORCE
+                    pu.x += direction.x
+                    pu.y += direction.y
 
         # ── Power-up collection ───────────────────────────────
         if self.player.alive:
             player_rect = self.player.rect
             for pu in self.level.powerups:
-                if not pu.collected and player_rect.colliderect(pu.rect):
-                    pu.collected = True
-                    self.player.can_shoot = True
-                    self.particles.emit_coin_sparkle(int(pu.x), int(pu.y))
-                    self.sound.play("coin")  # reuse coin sound
+                if pu.collected:
+                    continue
+                if not player_rect.colliderect(pu.rect):
+                    continue
+
+                pu.collected = True
+                ptype = pu.powerup_type
+
+                if ptype == "heart":
+                    if self.player.lives < self.player.max_lives:
+                        self.player.lives += 1
+                    self.sound.play("powerup")
+
+                elif ptype == "wormhole":
+                    # Teleport forward with safety check
+                    new_x = self.player.position.x + (self.player.facing * WORMHOLE_TILES * TILE_SIZE)
+                    # Build a test rect at the new position
+                    test_rect = pygame.Rect(
+                        int(new_x), int(self.player.position.y),
+                        self.player.width, self.player.height,
+                    )
+                    # Safety: if new position collides, step back pixel-by-pixel
+                    step = -1 if self.player.facing > 0 else 1
+                    for _ in range(WORMHOLE_TILES * TILE_SIZE):
+                        collides = False
+                        for plat in active_platforms:
+                            if test_rect.colliderect(plat.rect):
+                                collides = True
+                                break
+                        if not collides:
+                            for obs in self.level.obstacles:
+                                if test_rect.colliderect(obs.rect):
+                                    collides = True
+                                    break
+                        if not collides:
+                            break
+                        new_x += step
+                        test_rect.x = int(new_x)
+                    self.player.position.x = new_x
+                    self.sound.play("wormhole")
+                    self.particles.emit_coin_sparkle(
+                        int(self.player.center_x), int(self.player.center_y),
+                    )
+
+                elif ptype == "weapon":
+                    weapon_name = self.player.unlock_next_weapon()
+                    self.sound.play("powerup")
+
+                elif ptype in ("dash", "magnet", "shield", "blackhole", "void"):
+                    self.player.activate_powerup(ptype)
+                    self.sound.play("powerup")
+
+                self.particles.emit_coin_sparkle(int(pu.x), int(pu.y))
 
         # ── Coin collection ──────────────────────────────────
         if self.player.alive:
@@ -308,7 +457,7 @@ class PlayingState(GameState):
                     coin.collected = True
                     self.score += COIN_SCORE
                     self.coins_collected += 1
-                    self.particles.emit_coin_sparkle(coin.x, coin.y)
+                    self.particles.emit_coin_sparkle(int(coin.x), int(coin.y))
                     self.sound.play("coin")
 
         # ── Level completion ─────────────────────────────────
@@ -343,16 +492,21 @@ class PlayingState(GameState):
         for bullet in self.player_bullets:
             bullet.draw(surface, cam_x, cam_y)
 
+        # Draw laser beam (single frame)
+        if self.laser_beam is not None:
+            self.laser_beam.draw(surface, cam_x, cam_y)
+
         # Draw particles (behind and in front of player)
         self.particles.draw(surface, cam_x, cam_y)
 
         # Draw player
         self.player.draw(surface, cam_x, cam_y)
 
-        # Draw HUD
+        # Draw HUD (now includes hearts, powerups, weapon)
         self.hud.draw(
             surface, self.score, self.level_number,
             self.player.dash_cooldown_timer, self.coins_collected,
+            player=self.player,
         )
 
 

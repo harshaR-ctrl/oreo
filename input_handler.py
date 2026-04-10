@@ -112,6 +112,14 @@ class InputHandler:
             or self._just_pressed(pygame.K_z)
         )
 
+    def shoot_held(self) -> bool:
+        """True while F or Z is held down (for continuous laser)."""
+        return self._is_held(pygame.K_f) or self._is_held(pygame.K_z)
+
+    def weapon_switch_pressed(self) -> bool:
+        """True on the frame Q is first pressed (cycle weapons)."""
+        return self._just_pressed(pygame.K_q)
+
     # ── Raw key helpers ──────────────────────────────────────────────
 
     def _is_held(self, key: int) -> bool:

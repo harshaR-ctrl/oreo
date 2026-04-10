@@ -133,6 +133,53 @@ COL_OBSTACLE_EDGE: tuple = (100, 110, 130)
 COL_POWERUP_GUN: tuple = (255, 255, 200)
 COL_POWERUP_GLOW: tuple = (255, 240, 150)
 
+# ─── Lives ────────────────────────────────────────────────────────────
+MAX_LIVES: int = 3
+DAMAGE_INVINCIBILITY: float = 1.5     # seconds of i-frames after taking damage
+
+# ─── PowerUp Durations (ms, for pygame.time.get_ticks()) ─────────────
+POWERUP_DASH_DURATION: int = 8000     # 8 seconds of 2x speed
+POWERUP_MAGNET_DURATION: int = 10000  # 10 seconds
+POWERUP_SHIELD_DURATION: int = 6000   # 6 seconds
+POWERUP_BLACKHOLE_DURATION: int = 6000
+POWERUP_VOID_DURATION: int = 6000
+MAGNET_RANGE: float = 200.0           # px radius for coin/powerup attraction
+MAGNET_FORCE: float = 5.0             # attraction vector magnitude
+WORMHOLE_TILES: int = 5               # teleport distance in tiles
+TILE_SIZE: int = 12                   # reference tile unit for wormhole
+
+# ─── Weapons (Strategy Pattern) ──────────────────────────────────────
+WEAPON_TYPES: dict = {
+    'pistol':  {'cooldown': 500,  'bullets': 1, 'spread': 0,  'is_continuous': False},
+    'shotgun': {'cooldown': 800,  'bullets': 3, 'spread': 15, 'is_continuous': False},
+    'rapid':   {'cooldown': 150,  'bullets': 1, 'spread': 5,  'is_continuous': False},
+    'laser':   {'cooldown': 0,    'bullets': 1, 'spread': 0,  'is_continuous': True},
+}
+WEAPON_ORDER: list = ['pistol', 'shotgun', 'rapid', 'laser']
+
+# ─── Loot Weights (for random.choices) ───────────────────────────────
+LOOT_WEIGHTS: dict = {
+    'heart':     5,
+    'dash':      20,
+    'magnet':    15,
+    'wormhole':  10,
+    'blackhole': 8,
+    'void':      7,
+    'shield':    12,
+    'weapon':    15,
+}
+
+# ─── New Colors ───────────────────────────────────────────────────────
+COL_HEART_FULL: tuple = (255, 60, 80)
+COL_HEART_EMPTY: tuple = (60, 60, 80)
+COL_SHIELD_RING: tuple = (80, 200, 255)
+COL_MAGNET: tuple = (255, 100, 255)
+COL_WORMHOLE: tuple = (100, 255, 180)
+COL_BLACKHOLE: tuple = (40, 0, 80)
+COL_VOID: tuple = (200, 60, 255)
+COL_DASH_POWERUP: tuple = (255, 200, 60)
+COL_WEAPON_PICKUP: tuple = (100, 255, 200)
+
 # ─── Sound ────────────────────────────────────────────────────────────
 SOUND_ENABLED: bool = True
 SAMPLE_RATE: int = 22050
