@@ -18,7 +18,11 @@ from settings import (
     JUMP_IMPULSE, GRAVITY, MAX_RUN_SPEED,
     COL_PLATFORM, COL_PLATFORM_TOP, COL_PLATFORM_BOUNCE,
     COL_PLATFORM_CRUMBLE, COL_GOAL_PLATFORM, COL_COIN,
+    ENEMY_WIDTH, ENEMY_HEIGHT, OBSTACLE_WIDTH, OBSTACLE_HEIGHT,
 )
+from enemies import Dasher, Marksman, Hybrid
+from obstacles import Obstacle
+from powerups import GunPowerUp
 
 
 class Platform:
@@ -135,6 +139,9 @@ class LevelGenerator:
     def __init__(self) -> None:
         self.platforms: list[Platform] = []
         self.coins: list[Coin] = []
+        self.enemies: list = []          # Dasher, Marksman, Hybrid
+        self.obstacles: list[Obstacle] = []
+        self.powerups: list[GunPowerUp] = []
         self.goal_platform: Platform | None = None
         self.level_number: int = 0
         self.seed: int = 0
@@ -159,6 +166,9 @@ class LevelGenerator:
 
         self.platforms.clear()
         self.coins.clear()
+        self.enemies.clear()
+        self.obstacles.clear()
+        self.powerups.clear()
 
         # Difficulty scaling
         difficulty = min(level_number / 10.0, 1.0)  # 0.0 to 1.0 over 10 levels
@@ -234,19 +244,67 @@ class LevelGenerator:
         # Coin on goal
         self.coins.append(Coin(goal_x + 25, int(goal_y) - 10))
 
+        # ── Spawn enemies on random platforms ─────────────────────
+        # Skip ground (index 0) and goal (last). Normal platforms only.
+        eligible_plats = [
+            p for p in self.platforms
+            if p.platform_type == "normal" and p != ground and p != self.goal_platform
+        ]
+        random.shuffle(eligible_plats)
+
+        # Number of enemies scales with difficulty
+        num_enemies = min(len(eligible_plats), 1 + int(difficulty * 3))
+        enemy_classes = [Dasher, Marksman, Hybrid]
+
+        for i in range(num_enemies):
+            plat = eligible_plats[i]
+            ex = plat.rect.x + plat.rect.width // 2 - ENEMY_WIDTH // 2
+            ey = plat.rect.y - ENEMY_HEIGHT
+            enemy_cls = enemy_classes[i % len(enemy_classes)]
+            self.enemies.append(enemy_cls(ex, ey))
+
+        # ── Spawn obstacles ──────────────────────────────────────
+        remaining_plats = eligible_plats[num_enemies:]
+        random.shuffle(remaining_plats)
+        num_obstacles = min(len(remaining_plats), 1 + int(difficulty * 2))
+        for i in range(num_obstacles):
+            plat = remaining_plats[i]
+            ox = plat.rect.x + random.randint(2, max(3, plat.rect.width - OBSTACLE_WIDTH - 2))
+            oy = plat.rect.y - OBSTACLE_HEIGHT
+            self.obstacles.append(Obstacle(ox, oy))
+
+        # ── Spawn one Gun/Milk power-up on an early-ish platform ─
+        # Pick a platform in the first half of the level
+        early_plats = [
+            p for p in eligible_plats
+            if p.rect.y > GROUND_Y - (GROUND_Y - goal_y) * 0.6
+            and p not in [remaining_plats[j] for j in range(num_obstacles) if j < len(remaining_plats)]
+        ]
+        if early_plats:
+            pu_plat = random.choice(early_plats)
+            px = pu_plat.rect.x + pu_plat.rect.width // 2
+            py = pu_plat.rect.y - 12
+            self.powerups.append(GunPowerUp(px, py))
+
     def update(self, dt: float) -> None:
-        """Update all platforms and coins."""
+        """Update all platforms, coins, and powerups."""
         for plat in self.platforms:
             plat.update(dt)
         for coin in self.coins:
             coin.update(dt)
+        for pu in self.powerups:
+            pu.update(dt)
 
     def draw(self, surface: pygame.Surface, cam_x: float, cam_y: float) -> None:
-        """Draw all platforms and coins."""
+        """Draw all platforms, coins, obstacles, enemies, and powerups."""
         for plat in self.platforms:
             plat.draw(surface, cam_x, cam_y)
         for coin in self.coins:
             coin.draw(surface, cam_x, cam_y)
+        for obs in self.obstacles:
+            obs.draw(surface, cam_x, cam_y)
+        for pu in self.powerups:
+            pu.draw(surface, cam_x, cam_y)
 
     def get_active_platforms(self) -> list[Platform]:
         """Return only active (non-crumbled) platforms."""

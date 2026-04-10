@@ -23,6 +23,8 @@ from player import Player
 from level import LevelGenerator
 from hud import HUD
 from sounds import SoundManager
+from projectiles import Projectile, PlayerBullet
+from enemies import Dasher, Marksman, Hybrid
 
 
 class GameState:
@@ -111,7 +113,7 @@ class MenuState(GameState):
 
         # Controls hint
         controls = self.hint_font.render(
-            "←→ / AD Move   SPACE Jump   SHIFT Dash", True, COL_TEXT_DIM
+            "←→ / AD Move  SPACE Jump  SHIFT Dash  F Shoot", True, COL_TEXT_DIM
         )
         surface.blit(
             controls,
@@ -151,6 +153,10 @@ class PlayingState(GameState):
         self.coins_collected: int = 0
         self.death_timer: float = 0.0
 
+        # Projectile groups
+        self.enemy_projectiles: list[Projectile] = []
+        self.player_bullets: list[PlayerBullet] = []
+
     def enter(self) -> None:
         self.score = 0
         self.level_number = 1
@@ -164,6 +170,8 @@ class PlayingState(GameState):
         self.particles.clear()
         self.camera.reset(self.player.center_x, self.player.center_y)
         self.death_timer = 0.0
+        self.enemy_projectiles.clear()
+        self.player_bullets.clear()
 
     def update(self, inp: InputHandler, dt: float) -> str | None:
         # ── Death state ──────────────────────────────────────────
@@ -178,11 +186,11 @@ class PlayingState(GameState):
         # ── Update level (crumbling platforms) ───────────────────
         self.level.update(dt)
 
-        # ── Update player ────────────────────────────────────────
+        # ── Update player ────────────────────────────────────
         active_platforms = self.level.get_active_platforms()
         events = self.player.update(inp, active_platforms, dt)
 
-        # ── Handle events ────────────────────────────────────────
+        # ── Handle player events ────────────────────────────
         if events["jumped"]:
             self.sound.play("jump")
         if events["landed"]:
@@ -195,25 +203,123 @@ class PlayingState(GameState):
         if events["wall_hit"] and events["wall_speed"] > 120:
             self.camera.add_trauma(events["wall_speed"] / 500.0)
 
-        # ── Coin collection ──────────────────────────────────────
-        player_rect = self.player.rect
-        for coin in self.level.coins:
-            if not coin.collected and player_rect.colliderect(coin.rect):
-                coin.collected = True
-                self.score += COIN_SCORE
-                self.coins_collected += 1
-                self.particles.emit_coin_sparkle(coin.x, coin.y)
-                self.sound.play("coin")
+        # ── Player shooting → spawn bullet ─────────────────────
+        if events["shot"]:
+            bullet = PlayerBullet(
+                self.player.center_x + self.player.facing * 6,
+                self.player.center_y,
+                self.player.facing,
+            )
+            self.player_bullets.append(bullet)
 
-        # ── Level completion ─────────────────────────────────────
+        # ── Update enemies ───────────────────────────────────
+        player_pos = pygame.Vector2(self.player.center_x, self.player.center_y)
+        player_vel = pygame.Vector2(self.player.velocity.x, self.player.velocity.y)
+        for enemy in self.level.enemies:
+            if not enemy.alive:
+                continue
+            enemy.update(
+                player_pos, player_vel,
+                active_platforms, self.level.obstacles, dt,
+            )
+            # Check if enemy wants to fire a projectile
+            fire = enemy.get_fire_request()
+            if fire is not None:
+                proj = Projectile(
+                    fire["x"], fire["y"],
+                    fire["dx"], fire["dy"],
+                    fire["speed"],
+                )
+                self.enemy_projectiles.append(proj)
+
+        # ── Update projectiles ───────────────────────────────
+        for proj in self.enemy_projectiles:
+            proj.update(active_platforms, self.level.obstacles, dt)
+        self.enemy_projectiles = [p for p in self.enemy_projectiles if p.alive]
+
+        for bullet in self.player_bullets:
+            bullet.update(active_platforms, self.level.obstacles, dt)
+        self.player_bullets = [b for b in self.player_bullets if b.alive]
+
+        # ── Collision: player bullets ↔ enemies ───────────────
+        for bullet in self.player_bullets[:]:
+            if not bullet.alive:
+                continue
+            for enemy in self.level.enemies:
+                if not enemy.alive:
+                    continue
+                if bullet.rect.colliderect(enemy.rect):
+                    bullet.alive = False
+                    enemy.alive = False
+                    self.particles.emit_death_burst(
+                        enemy.position.x + enemy.rect.width / 2,
+                        enemy.position.y + enemy.rect.height / 2,
+                    )
+                    self.score += 200
+                    break
+
+        # ── Collision: enemy projectiles ↔ player ─────────────
+        if self.player.alive:
+            player_rect = self.player.rect
+            for proj in self.enemy_projectiles:
+                if not proj.alive:
+                    continue
+                if player_rect.colliderect(proj.rect):
+                    self.player.alive = False
+                    events["died"] = True
+                    self.sound.play("death")
+                    self.camera.add_trauma(0.8)
+                    self.particles.emit_death_burst(
+                        self.player.center_x, self.player.center_y,
+                    )
+                    break
+
+        # ── Collision: player body ↔ enemies ─────────────────
+        if self.player.alive:
+            player_rect = self.player.rect
+            for enemy in self.level.enemies:
+                if not enemy.alive:
+                    continue
+                if player_rect.colliderect(enemy.rect):
+                    self.player.alive = False
+                    events["died"] = True
+                    self.sound.play("death")
+                    self.camera.add_trauma(0.8)
+                    self.particles.emit_death_burst(
+                        self.player.center_x, self.player.center_y,
+                    )
+                    break
+
+        # ── Power-up collection ───────────────────────────────
+        if self.player.alive:
+            player_rect = self.player.rect
+            for pu in self.level.powerups:
+                if not pu.collected and player_rect.colliderect(pu.rect):
+                    pu.collected = True
+                    self.player.can_shoot = True
+                    self.particles.emit_coin_sparkle(int(pu.x), int(pu.y))
+                    self.sound.play("coin")  # reuse coin sound
+
+        # ── Coin collection ──────────────────────────────────
+        if self.player.alive:
+            player_rect = self.player.rect
+            for coin in self.level.coins:
+                if not coin.collected and player_rect.colliderect(coin.rect):
+                    coin.collected = True
+                    self.score += COIN_SCORE
+                    self.coins_collected += 1
+                    self.particles.emit_coin_sparkle(coin.x, coin.y)
+                    self.sound.play("coin")
+
+        # ── Level completion ─────────────────────────────────
         if self.level.goal_platform and self.player.on_ground:
-            if player_rect.colliderect(self.level.goal_platform.rect):
+            if self.player.rect.colliderect(self.level.goal_platform.rect):
                 self.score += LEVEL_COMPLETE_BONUS
                 self.level_number += 1
                 self.sound.play("level_complete")
                 self._load_level()
 
-        # ── Update systems ───────────────────────────────────────
+        # ── Update systems ───────────────────────────────────
         self.particles.update(dt)
         self.camera.set_target(self.player.center_x, self.player.center_y)
         self.camera.update(dt)
@@ -224,8 +330,18 @@ class PlayingState(GameState):
         cam_x = self.camera.x
         cam_y = self.camera.y
 
-        # Draw level
+        # Draw level (platforms, coins, obstacles, powerups)
         self.level.draw(surface, cam_x, cam_y)
+
+        # Draw enemies
+        for enemy in self.level.enemies:
+            enemy.draw(surface, cam_x, cam_y)
+
+        # Draw projectiles
+        for proj in self.enemy_projectiles:
+            proj.draw(surface, cam_x, cam_y)
+        for bullet in self.player_bullets:
+            bullet.draw(surface, cam_x, cam_y)
 
         # Draw particles (behind and in front of player)
         self.particles.draw(surface, cam_x, cam_y)

@@ -102,6 +102,37 @@ COL_TEXT_ACCENT: tuple = (100, 220, 255)
 COL_HUD_BG: tuple = (12, 12, 20, 180)
 COL_MENU_PARTICLE: tuple = (60, 70, 100)
 
+# ─── Enemies ──────────────────────────────────────────────────────────
+DASHER_SPEED: float = MAX_RUN_SPEED * 0.7
+MARKSMAN_COOLDOWN: float = 2.5            # seconds between shots
+MARKSMAN_FLASH_DURATION: float = 0.2      # seconds of telegraph flash
+MARKSMAN_LEAD_FACTOR: float = 0.35        # prediction lookahead multiplier
+HYBRID_FIRE_COOLDOWN: float = 2.0         # seconds between hybrid shots
+PROJECTILE_SPEED: float = 200.0           # enemy projectile px/s
+PLAYER_BULLET_SPEED: float = 300.0        # player bullet px/s
+PLAYER_SHOOT_COOLDOWN: float = 0.3        # seconds between player shots
+ENEMY_WIDTH: int = 10
+ENEMY_HEIGHT: int = 12
+
+# ─── Obstacles ────────────────────────────────────────────────────────
+OBSTACLE_WIDTH: int = 12
+OBSTACLE_HEIGHT: int = 12
+
+# ─── Enemy & Entity Colors ───────────────────────────────────────────
+COL_DASHER: tuple = (220, 60, 60)
+COL_DASHER_EYE: tuple = (255, 200, 200)
+COL_MARKSMAN: tuple = (160, 80, 220)
+COL_MARKSMAN_FLASH: tuple = (255, 255, 255)
+COL_MARKSMAN_EYE: tuple = (255, 180, 255)
+COL_HYBRID: tuple = (240, 140, 40)
+COL_HYBRID_EYE: tuple = (255, 220, 160)
+COL_ENEMY_PROJECTILE: tuple = (255, 100, 100)
+COL_PLAYER_BULLET: tuple = (100, 255, 220)
+COL_OBSTACLE: tuple = (70, 75, 90)
+COL_OBSTACLE_EDGE: tuple = (100, 110, 130)
+COL_POWERUP_GUN: tuple = (255, 255, 200)
+COL_POWERUP_GLOW: tuple = (255, 240, 150)
+
 # ─── Sound ────────────────────────────────────────────────────────────
 SOUND_ENABLED: bool = True
 SAMPLE_RATE: int = 22050

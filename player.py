@@ -15,7 +15,7 @@ from settings import (
     DASH_SPEED, MOMENTUM_FACTOR, DASH_COOLDOWN, DASH_DURATION,
     COYOTE_FRAMES, JUMP_BUFFER_FRAMES,
     COL_PLAYER_BODY, COL_PLAYER_OUTLINE, COL_PLAYER_DASH, COL_PLAYER_EYE,
-    FPS,
+    FPS, PLAYER_SHOOT_COOLDOWN,
 )
 from input_handler import InputHandler
 from physics import PhysicsEngine
@@ -63,6 +63,10 @@ class Player:
         self.can_dash: bool = True  # Reset on landing
         self.dash_ghost_timer: float = 0.0
 
+        # Shooting
+        self.can_shoot: bool = False
+        self.shoot_cooldown_timer: float = 0.0
+
         # Visual
         self.squash_stretch: float = 1.0  # 1.0 = normal, <1 = squash, >1 = stretch
         self.eye_target_x: float = 0.0
@@ -100,13 +104,15 @@ class Player:
         self.dash_timer = 0.0
         self.is_dashing = False
         self.can_dash = True
+        self.can_shoot = False
+        self.shoot_cooldown_timer = 0.0
         self.squash_stretch = 1.0
 
     def update(self, inp: InputHandler, platforms: list, dt: float) -> dict:
         """Full player update: input → physics → collision → state.
         
         Returns event dict with flags for sound/VFX triggers:
-          - jumped, landed, dashed, died, wall_hit, wall_speed
+          - jumped, landed, dashed, died, wall_hit, wall_speed, shot
         """
         events: dict = {
             "jumped": False,
@@ -115,6 +121,7 @@ class Player:
             "died": False,
             "wall_hit": False,
             "wall_speed": 0.0,
+            "shot": False,
         }
 
         if not self.alive:
@@ -203,6 +210,12 @@ class Player:
         if inp.dash_pressed() and self.can_dash and self.dash_cooldown_timer <= 0:
             self._start_dash(inp)
             events["dashed"] = True
+
+        # ── Shooting ──────────────────────────────────────────────────
+        self.shoot_cooldown_timer = max(0, self.shoot_cooldown_timer - dt)
+        if inp.shoot_pressed() and self.can_shoot and self.shoot_cooldown_timer <= 0:
+            self.shoot_cooldown_timer = PLAYER_SHOOT_COOLDOWN
+            events["shot"] = True
 
         # ── Move and collide ─────────────────────────────────────
         collision = self.physics.move_and_collide(

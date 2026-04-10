@@ -65,6 +65,7 @@ class PhysicsEngine:
         height: int,
         platforms: list,
         dt: float,
+        obstacles: list | None = None,
     ) -> dict:
         """Move entity and resolve collisions using 2-step axis separation.
         
@@ -117,6 +118,22 @@ class PhysicsEngine:
                         velocity.x = 0
                     player_rect.x = int(position.x)
 
+            # Obstacle X collision
+            if obstacles:
+                for obs in obstacles:
+                    if player_rect.colliderect(obs.rect):
+                        if sub_dx > 0:
+                            position.x = obs.rect.left - width
+                            result["hit_wall_right"] = True
+                            result["wall_speed"] = abs(velocity.x)
+                            velocity.x = 0
+                        elif sub_dx < 0:
+                            position.x = obs.rect.right
+                            result["hit_wall_left"] = True
+                            result["wall_speed"] = abs(velocity.x)
+                            velocity.x = 0
+                        player_rect.x = int(position.x)
+
             # ── Step 2: Move Y and resolve ────────────────────────
             position.y += sub_dy
             player_rect = pygame.Rect(
@@ -143,6 +160,20 @@ class PhysicsEngine:
                         velocity.y = 0
                         result["hit_ceiling"] = True
                     player_rect.y = int(position.y)
+
+            # Obstacle Y collision
+            if obstacles:
+                for obs in obstacles:
+                    if player_rect.colliderect(obs.rect):
+                        if sub_dy > 0:
+                            position.y = obs.rect.top - height
+                            velocity.y = 0
+                            result["on_ground"] = True
+                        elif sub_dy < 0:
+                            position.y = obs.rect.bottom
+                            velocity.y = 0
+                            result["hit_ceiling"] = True
+                        player_rect.y = int(position.y)
 
         # Check if player fell off the bottom
         if position.y > GROUND_Y + INTERNAL_HEIGHT:

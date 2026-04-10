@@ -105,6 +105,13 @@ class InputHandler:
             return 1.0
         return 0.0
 
+    def shoot_pressed(self) -> bool:
+        """True on the frame F or Z is first pressed (for shooting)."""
+        return (
+            self._just_pressed(pygame.K_f)
+            or self._just_pressed(pygame.K_z)
+        )
+
     # ── Raw key helpers ──────────────────────────────────────────────
 
     def _is_held(self, key: int) -> bool:
