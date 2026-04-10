@@ -264,7 +264,7 @@ class Player:
 
     # ── Main update ──────────────────────────────────────────────────
 
-    def update(self, inp: InputHandler, platforms: list, dt: float) -> dict:
+    def update(self, inp: InputHandler, platforms: list, dt: float, obstacles: list | None = None) -> dict:
         """Full player update: input → physics → collision → state.
 
         Returns event dict with flags for sound/VFX triggers:
@@ -327,6 +327,7 @@ class Player:
                 collision = self.physics.move_and_collide(
                     self.position, self.velocity,
                     self.width, self.height, platforms, dt,
+                    obstacles=obstacles,
                 )
                 self._handle_collision(collision, events)
                 self._update_visual_state(inp, dt)
@@ -405,6 +406,7 @@ class Player:
         collision = self.physics.move_and_collide(
             self.position, self.velocity,
             self.width, self.height, platforms, dt,
+            obstacles=obstacles,
         )
         self._handle_collision(collision, events)
 

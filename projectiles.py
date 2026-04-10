@@ -25,11 +25,14 @@ class Projectile(pygame.sprite.Sprite):
     SIZE: int = 3
 
     def __init__(
-        self, x: float, y: float, dx: float, dy: float, speed: float = 0,
+        self, x: float, y: float, dx: float, dy: float, speed: float = 0, ptype: str = "ground_flame"
     ) -> None:
         super().__init__()
+        self.ptype = ptype
+        self.visual_size = self.SIZE if self.ptype == "ground_flame" else self.SIZE * 2
+
         self.image: pygame.Surface = pygame.Surface(
-            (self.SIZE * 2, self.SIZE * 2), pygame.SRCALPHA,
+            (self.visual_size * 2, self.visual_size * 2), pygame.SRCALPHA,
         )
         self.position: pygame.Vector2 = pygame.Vector2(x, y)
         direction = pygame.Vector2(dx, dy)
@@ -37,39 +40,56 @@ class Projectile(pygame.sprite.Sprite):
             direction = direction.normalize()
         self.velocity: pygame.Vector2 = direction * (speed if speed > 0 else PROJECTILE_SPEED)
         self.rect: pygame.Rect = pygame.Rect(
-            int(x) - self.SIZE, int(y) - self.SIZE,
-            self.SIZE * 2, self.SIZE * 2,
+            int(x) - self.visual_size, int(y) - self.visual_size,
+            self.visual_size * 2, self.visual_size * 2,
         )
         self.alive: bool = True
+        self.distance_traveled: float = 0.0
 
     def update(self, platforms: list, obstacles, dt: float) -> None:
-        """Move the projectile and check collisions."""
+        """Move the projectile depending on its type."""
         if not self.alive:
             return
 
-        self.position += self.velocity * dt
-        self.rect.x = int(self.position.x) - self.SIZE
-        self.rect.y = int(self.position.y) - self.SIZE
+        if self.ptype == "big_flame":
+            # Linear aerial fireball: completely ignores gravity
+            self.position += self.velocity * dt
+            self.rect.x = int(self.position.x) - self.visual_size
+            self.rect.y = int(self.position.y) - self.visual_size
 
-        # Off-screen check (generous margin)
-        if (
-            self.position.x < -100 or self.position.x > INTERNAL_WIDTH + 500
-            or self.position.y < -500 or self.position.y > INTERNAL_HEIGHT + 500
-        ):
-            self.alive = False
-            self.kill()
-            return
-
-        # Platform collision
-        for plat in platforms:
-            if not plat.active:
-                continue
-            if self.rect.colliderect(plat.rect):
+            self.distance_traveled += (self.velocity.length() * dt)
+            if self.distance_traveled > 1500 or self.position.y > INTERNAL_HEIGHT * 3:
                 self.alive = False
                 self.kill()
                 return
 
-        # Obstacle collision
+            # Linear aerial flames die on walls & platforms
+            if obstacles:
+                for obs in obstacles:
+                    if self.rect.colliderect(obs.rect):
+                        self.alive = False
+                        self.kill()
+                        return
+            for plat in platforms:
+                if not plat.active: continue
+                if self.rect.colliderect(plat.rect):
+                    self.alive = False
+                    self.kill()
+                    return
+            return
+
+        # Ground flame logic (creeping)
+        if abs(self.velocity.x) < 50:
+            self.velocity.x = PROJECTILE_SPEED if self.velocity.x >= 0 else -PROJECTILE_SPEED
+        else:
+            self.velocity.x = (PROJECTILE_SPEED if self.velocity.x > 0 else -PROJECTILE_SPEED)
+
+        self.velocity.y += 980.0 * dt
+        self.velocity.y = min(self.velocity.y, 600.0)
+
+        self.position.x += self.velocity.x * dt
+        self.rect.x = int(self.position.x) - self.visual_size
+        
         if obstacles:
             for obs in obstacles:
                 if self.rect.colliderect(obs.rect):
@@ -77,16 +97,74 @@ class Projectile(pygame.sprite.Sprite):
                     self.kill()
                     return
 
+        self.distance_traveled += (abs(self.velocity.x) * dt)
+        if self.distance_traveled > 1500 or self.position.y > INTERNAL_HEIGHT * 3:
+            self.alive = False
+            self.kill()
+            return
+
+        self.position.y += self.velocity.y * dt
+        self.rect.y = int(self.position.y) - self.visual_size
+
+        for plat in platforms:
+            if not plat.active:
+                continue
+            if self.rect.colliderect(plat.rect) and self.velocity.y > 0:
+                self.position.y = plat.rect.top - self.visual_size
+                self.velocity.y = 0
+                self.rect.y = int(self.position.y) - self.visual_size
+                break
+
     def draw(self, surface: pygame.Surface, cam_x: float, cam_y: float) -> None:
-        """Draw a small glowing projectile circle."""
+        """Draw either a creeping ground flame or a big aerial straightforward fireball."""
         if not self.alive:
             return
         sx = int(self.position.x - cam_x)
         sy = int(self.position.y - cam_y)
-        # Outer glow
-        pygame.draw.circle(surface, (180, 60, 60), (sx, sy), self.SIZE + 1)
-        # Core
-        pygame.draw.circle(surface, COL_ENEMY_PROJECTILE, (sx, sy), self.SIZE)
+
+        import random, math
+        flicker_y = int(math.sin(pygame.time.get_ticks() * 0.02) * (2 if self.ptype == "ground_flame" else 4))
+        flicker_w = random.randint(0, 2 if self.ptype == "ground_flame" else 4)
+
+        if self.ptype == "big_flame":
+            # Drawing a larger, horizontal flying fireball
+            dx = 1 if self.velocity.x > 0 else -1
+            
+            # Fireball trails
+            core_points = [
+                (sx + dx * self.visual_size, sy),
+                (sx - dx * self.visual_size, sy - self.visual_size + flicker_w),
+                (sx - dx * self.visual_size - flicker_y, sy),
+                (sx - dx * self.visual_size, sy + self.visual_size - flicker_w),
+            ]
+            
+            pygame.draw.circle(surface, (255, 40, 20, 100), (sx, sy), self.visual_size + 4) # Aura
+            pygame.draw.polygon(surface, (255, 60, 20), core_points) 
+            
+            inner_points = [
+                (sx + dx * (self.visual_size - 2), sy),
+                (sx - dx * (self.visual_size - 2), sy - self.visual_size // 2 + flicker_w),
+                (sx - dx * (self.visual_size - 2) - flicker_y, sy),
+                (sx - dx * (self.visual_size - 2), sy + self.visual_size // 2 - flicker_w),
+            ]
+            pygame.draw.polygon(surface, (255, 200, 100), inner_points)
+
+        else:
+            # Ground flame
+            flame_points = [
+                (sx, sy - self.visual_size - flicker_y),
+                (sx - self.visual_size + flicker_w, sy + self.visual_size),
+                (sx + self.visual_size - flicker_w, sy + self.visual_size)
+            ]
+            pygame.draw.circle(surface, (255, 60, 20, 100), (sx, sy + self.visual_size//2), self.visual_size + 2)
+            pygame.draw.polygon(surface, (255, 100, 20), flame_points)
+            
+            core_points = [
+                (sx, sy - self.visual_size//2 - flicker_y),
+                (sx - self.visual_size//2 + flicker_w, sy + self.visual_size),
+                (sx + self.visual_size//2 - flicker_w, sy + self.visual_size)
+            ]
+            pygame.draw.polygon(surface, (255, 220, 100), core_points)
 
 
 class PlayerBullet(pygame.sprite.Sprite):
@@ -120,6 +198,7 @@ class PlayerBullet(pygame.sprite.Sprite):
             self.SIZE * 2 + 2, self.SIZE * 2,
         )
         self.alive: bool = True
+        self.distance_traveled: float = 0.0
 
     def update(self, platforms: list, obstacles, dt: float) -> None:
         """Move and check collisions (platforms & obstacles only; enemy hit done externally)."""
@@ -130,11 +209,9 @@ class PlayerBullet(pygame.sprite.Sprite):
         self.rect.x = int(self.position.x) - self.SIZE
         self.rect.y = int(self.position.y) - self.SIZE
 
-        # Off-screen
-        if (
-            self.position.x < -100 or self.position.x > INTERNAL_WIDTH + 500
-            or self.position.y < -500 or self.position.y > INTERNAL_HEIGHT + 500
-        ):
+        # Range check: kill bullet if it traveled too far
+        self.distance_traveled += (self.velocity.length() * dt)
+        if self.distance_traveled > 1200 or self.position.y > INTERNAL_HEIGHT * 3:
             self.alive = False
             self.kill()
             return

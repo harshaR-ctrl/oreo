@@ -72,7 +72,7 @@ class Game:
             # Pass results to game over screen
             self.gameover_state.set_results(
                 self.playing_state.score,
-                self.playing_state.level_number,
+                int(self.playing_state.max_distance / 10),
             )
             self.current_state = self.gameover_state
 

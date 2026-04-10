@@ -53,7 +53,7 @@ class HUD:
         self,
         surface: pygame.Surface,
         score: int,
-        level: int,
+        distance: int,
         dash_cooldown: float,
         coins_collected: int,
         player=None,
@@ -65,9 +65,9 @@ class HUD:
         score_text = self._font.render(f"SCORE {score}", True, COL_TEXT)
         surface.blit(score_text, (4, 4))
 
-        # Level — top right
-        level_text = self._font_small.render(f"LV {level}", True, COL_TEXT_DIM)
-        surface.blit(level_text, (INTERNAL_WIDTH - level_text.get_width() - 4, 5))
+        # Distance — top right
+        dist_text = self._font_small.render(f"{distance}m", True, COL_TEXT_DIM)
+        surface.blit(dist_text, (INTERNAL_WIDTH - dist_text.get_width() - 4, 5))
 
         # ── Hearts — below score ─────────────────────────────────
         if player is not None:

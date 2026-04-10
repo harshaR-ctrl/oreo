@@ -13,7 +13,7 @@ import pygame
 from settings import (
     INTERNAL_WIDTH, INTERNAL_HEIGHT,
     COL_TEXT, COL_TEXT_DIM, COL_TEXT_ACCENT, COL_PLAYER_BODY,
-    COL_BG, COIN_SCORE, LEVEL_COMPLETE_BONUS,
+    COL_BG, COIN_SCORE,
     PLAYER_SPAWN_X, PLAYER_SPAWN_Y,
     MAGNET_RANGE, MAGNET_FORCE,
     WORMHOLE_TILES, TILE_SIZE,
@@ -155,9 +155,9 @@ class PlayingState(GameState):
         self.hud: HUD = HUD()
 
         self.score: int = 0
-        self.level_number: int = 1
         self.coins_collected: int = 0
         self.death_timer: float = 0.0
+        self.max_distance: float = 0.0     # tracks furthest X for distance score
 
         # Projectile groups
         self.enemy_projectiles: list[Projectile] = []
@@ -166,13 +166,13 @@ class PlayingState(GameState):
 
     def enter(self) -> None:
         self.score = 0
-        self.level_number = 1
         self.coins_collected = 0
+        self.max_distance = 0.0
         self._load_level()
 
     def _load_level(self) -> None:
         """Generate and start a new level."""
-        self.level.generate(self.level_number)
+        self.level.generate(1)
         self.player.reset(PLAYER_SPAWN_X, PLAYER_SPAWN_Y)
         self.particles.clear()
         self.camera.reset(self.player.center_x, self.player.center_y)
@@ -196,7 +196,7 @@ class PlayingState(GameState):
 
         # ── Update player ────────────────────────────────────
         active_platforms = self.level.get_active_platforms()
-        events = self.player.update(inp, active_platforms, dt)
+        events = self.player.update(inp, active_platforms, dt, obstacles=self.level.obstacles)
 
         # ── Handle player events ────────────────────────────
         if events["jumped"]:
@@ -262,6 +262,7 @@ class PlayingState(GameState):
                     fire["x"], fire["y"],
                     fire["dx"], fire["dy"],
                     fire["speed"],
+                    ptype=fire.get("type", "ground_flame")
                 )
                 self.enemy_projectiles.append(proj)
 
@@ -460,13 +461,15 @@ class PlayingState(GameState):
                     self.particles.emit_coin_sparkle(int(coin.x), int(coin.y))
                     self.sound.play("coin")
 
-        # ── Level completion ─────────────────────────────────
-        if self.level.goal_platform and self.player.on_ground:
-            if self.player.rect.colliderect(self.level.goal_platform.rect):
-                self.score += LEVEL_COMPLETE_BONUS
-                self.level_number += 1
-                self.sound.play("level_complete")
-                self._load_level()
+        # ── Endless streaming — generate ahead, cleanup behind ──
+        self.level.stream_update(self.player.position.x)
+
+        # ── Distance score ────────────────────────────────────
+        current_dist = max(0, self.player.position.x - PLAYER_SPAWN_X)
+        if current_dist > self.max_distance:
+            dist_delta = current_dist - self.max_distance
+            self.score += int(dist_delta * 0.5)  # 0.5 points per pixel
+            self.max_distance = current_dist
 
         # ── Update systems ───────────────────────────────────
         self.particles.update(dt)
@@ -503,8 +506,9 @@ class PlayingState(GameState):
         self.player.draw(surface, cam_x, cam_y)
 
         # Draw HUD (now includes hearts, powerups, weapon)
+        distance_m = int(self.max_distance / 10)  # convert px to meters
         self.hud.draw(
-            surface, self.score, self.level_number,
+            surface, self.score, distance_m,
             self.player.dash_cooldown_timer, self.coins_collected,
             player=self.player,
         )
@@ -532,10 +536,10 @@ class GameOverState(GameState):
     def enter(self) -> None:
         self.timer = 0.0
 
-    def set_results(self, score: int, level: int) -> None:
-        """Set the score and level to display."""
+    def set_results(self, score: int, distance: int) -> None:
+        """Set the score and distance to display."""
         self.final_score = score
-        self.final_level = level
+        self.final_distance = distance
 
     def update(self, inp: InputHandler, dt: float) -> str | None:
         self.timer += dt
@@ -566,13 +570,13 @@ class GameOverState(GameState):
             ((INTERNAL_WIDTH - score_text.get_width()) // 2, INTERNAL_HEIGHT // 2 - 5),
         )
 
-        # Level
-        level_text = self.hint_font.render(
-            f"Reached Level {self.final_level}", True, COL_TEXT_DIM,
+        # Distance
+        dist_text = self.hint_font.render(
+            f"Distance: {self.final_distance}m", True, COL_TEXT_DIM,
         )
         surface.blit(
-            level_text,
-            ((INTERNAL_WIDTH - level_text.get_width()) // 2, INTERNAL_HEIGHT // 2 + 15),
+            dist_text,
+            ((INTERNAL_WIDTH - dist_text.get_width()) // 2, INTERNAL_HEIGHT // 2 + 15),
         )
 
         # Retry prompt
