@@ -51,15 +51,15 @@ PLAYER_SPAWN_X: int = 40
 PLAYER_SPAWN_Y: int = 260
 
 # ─── Level Generation ────────────────────────────────────────────────
-PLATFORM_MIN_WIDTH: int = 30
-PLATFORM_MAX_WIDTH: int = 70
+PLATFORM_MIN_WIDTH: int = 45
+PLATFORM_MAX_WIDTH: int = 90
 PLATFORM_HEIGHT: int = 6
-MIN_GAP_X: int = 20
-MAX_GAP_X: int = 65
-MIN_GAP_Y: int = 18
-MAX_GAP_Y: int = 45
+MIN_GAP_X: int = 10
+MAX_GAP_X: int = 35
+MIN_GAP_Y: int = 14
+MAX_GAP_Y: int = 30
 GROUND_Y: int = 290
-PLATFORMS_PER_LEVEL: int = 14
+PLATFORMS_PER_LEVEL: int = 12
 COIN_SIZE: int = 6
 COIN_SCORE: int = 100
 LEVEL_COMPLETE_BONUS: int = 500
@@ -103,20 +103,20 @@ COL_HUD_BG: tuple = (12, 12, 20, 180)
 COL_MENU_PARTICLE: tuple = (60, 70, 100)
 
 # ─── Enemies ──────────────────────────────────────────────────────────
-DASHER_SPEED: float = MAX_RUN_SPEED * 0.7
-MARKSMAN_COOLDOWN: float = 2.5            # seconds between shots
-MARKSMAN_FLASH_DURATION: float = 0.2      # seconds of telegraph flash
-MARKSMAN_LEAD_FACTOR: float = 0.35        # prediction lookahead multiplier
-HYBRID_FIRE_COOLDOWN: float = 2.0         # seconds between hybrid shots
-PROJECTILE_SPEED: float = 200.0           # enemy projectile px/s
+DASHER_SPEED: float = MAX_RUN_SPEED * 0.5  # slower chase (was 0.7)
+MARKSMAN_COOLDOWN: float = 3.5            # seconds between shots (was 2.5)
+MARKSMAN_FLASH_DURATION: float = 0.4      # longer telegraph (was 0.2)
+MARKSMAN_LEAD_FACTOR: float = 0.2         # less prediction (was 0.35)
+HYBRID_FIRE_COOLDOWN: float = 3.0         # seconds between hybrid shots (was 2.0)
+PROJECTILE_SPEED: float = 120.0           # enemy projectile px/s (was 200)
 PLAYER_BULLET_SPEED: float = 300.0        # player bullet px/s
 PLAYER_SHOOT_COOLDOWN: float = 0.3        # seconds between player shots
 ENEMY_WIDTH: int = 10
 ENEMY_HEIGHT: int = 12
 
 # ─── Obstacles ────────────────────────────────────────────────────────
-OBSTACLE_WIDTH: int = 12
-OBSTACLE_HEIGHT: int = 12
+OBSTACLE_WIDTH: int = 8
+OBSTACLE_HEIGHT: int = 8
 
 # ─── Enemy & Entity Colors ───────────────────────────────────────────
 COL_DASHER: tuple = (220, 60, 60)
@@ -134,8 +134,8 @@ COL_POWERUP_GUN: tuple = (255, 255, 200)
 COL_POWERUP_GLOW: tuple = (255, 240, 150)
 
 # ─── Lives ────────────────────────────────────────────────────────────
-MAX_LIVES: int = 3
-DAMAGE_INVINCIBILITY: float = 1.5     # seconds of i-frames after taking damage
+MAX_LIVES: int = 5
+DAMAGE_INVINCIBILITY: float = 2.0     # seconds of i-frames after taking damage
 
 # ─── PowerUp Durations (ms, for pygame.time.get_ticks()) ─────────────
 POWERUP_DASH_DURATION: int = 8000     # 8 seconds of 2x speed

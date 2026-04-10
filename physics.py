@@ -175,8 +175,8 @@ class PhysicsEngine:
                             result["hit_ceiling"] = True
                         player_rect.y = int(position.y)
 
-        # Check if player fell off the bottom
-        if position.y > GROUND_Y + INTERNAL_HEIGHT:
+        # Check if player fell off the bottom (works for horizontal levels too)
+        if position.y > GROUND_Y + INTERNAL_HEIGHT * 0.5:
             result["fell_off"] = True
 
         return result

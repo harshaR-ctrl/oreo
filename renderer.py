@@ -28,11 +28,11 @@ class StarField:
             self.stars.append((x, y, depth, brightness))
 
     def draw(
-        self, surface: pygame.Surface, cam_y: float, time: float
+        self, surface: pygame.Surface, cam_x: float, cam_y: float, time: float
     ) -> None:
-        """Draw parallax stars that twinkle subtly."""
+        """Draw parallax stars that scroll with the camera."""
         for sx, sy, depth, brightness in self.stars:
-            px = int(sx)
+            px = int(sx - cam_x * depth * 0.3) % INTERNAL_WIDTH
             py = int(sy - cam_y * depth) % (INTERNAL_HEIGHT + 100) - 50
             # Slight twinkle
             twinkle = int(brightness + 20 * ((hash((sx, sy)) + time * 2) % 1))
@@ -63,10 +63,10 @@ class Renderer:
             pygame.draw.line(surf, (r, g, b), (0, y), (INTERNAL_WIDTH, y))
         return surf
 
-    def begin_frame(self, cam_y: float, time: float) -> pygame.Surface:
+    def begin_frame(self, cam_x: float, cam_y: float, time: float) -> pygame.Surface:
         """Clear the internal surface with background. Returns it for drawing."""
         self.internal_surface.blit(self._bg_surface, (0, 0))
-        self.starfield.draw(self.internal_surface, cam_y, time)
+        self.starfield.draw(self.internal_surface, cam_x, cam_y, time)
         return self.internal_surface
 
     def end_frame(self) -> None:

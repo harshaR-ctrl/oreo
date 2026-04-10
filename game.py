@@ -99,8 +99,9 @@ class Game:
                 self._transition(next_state)
 
             # ── Render ───────────────────────────────────────────
+            cam_x = self.camera.x if self.current_state_name == "playing" else 0
             cam_y = self.camera.y if self.current_state_name == "playing" else 0
-            surface = self.renderer.begin_frame(cam_y, self.time)
+            surface = self.renderer.begin_frame(cam_x, cam_y, self.time)
             self.current_state.render(surface, self.time)
             self.renderer.end_frame()
 

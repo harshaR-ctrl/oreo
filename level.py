@@ -1,10 +1,10 @@
 """
-level.py — Procedural level generator.
+level.py — Procedural level generator (horizontal side-scroller).
 
-Creates platforms using a reachability-based algorithm: each new platform
-is placed within jump range of the previous one. Difficulty scales with
-level number. Includes coins, enemies, obstacles, weighted-random
-powerup loot, and a goal platform at the top.
+Creates platforms progressing rightward. Each new platform is placed
+within jump range to the right of the previous one. Difficulty scales
+with level number. Includes coins, enemies, obstacles, loot, and a
+goal platform at the far right.
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ class Coin:
 
 
 class LevelGenerator:
-    """Procedural level generation with reachability constraints."""
+    """Procedural side-scrolling level: platforms progress rightward."""
 
     def __init__(self) -> None:
         self.platforms: list[Platform] = []
@@ -148,15 +148,13 @@ class LevelGenerator:
         self.seed: int = 0
 
         # Pre-calculate max jump metrics from physics constants
-        # Max jump height: v²/(2g) where v = JUMP_IMPULSE
         self.max_jump_height: float = (JUMP_IMPULSE ** 2) / (2 * GRAVITY)
-        # Max jump distance: horizontal speed * time_in_air
         time_up = abs(JUMP_IMPULSE) / GRAVITY
         self.max_jump_distance: float = MAX_RUN_SPEED * time_up * 2
 
     def generate(self, level_number: int, seed: int | None = None) -> None:
-        """Generate a new level layout.
-        
+        """Generate a new horizontal level layout.
+
         Args:
             level_number: Current level (affects difficulty).
             seed: Random seed for reproducibility.
@@ -172,50 +170,49 @@ class LevelGenerator:
         self.powerups.clear()
 
         # Difficulty scaling
-        difficulty = min(level_number / 10.0, 1.0)  # 0.0 to 1.0 over 10 levels
+        difficulty = min(level_number / 10.0, 1.0)
 
-        # Ground platform
-        ground = Platform(0, GROUND_Y, INTERNAL_WIDTH, PLATFORM_HEIGHT, "normal")
+        # ── Ground / starting platform (wide, at the left) ────────
+        ground = Platform(0, GROUND_Y, INTERNAL_WIDTH // 2, PLATFORM_HEIGHT, "normal")
         self.platforms.append(ground)
 
-        # Generate platforms going upward
+        # Generate platforms progressing rightward
         num_platforms = PLATFORMS_PER_LEVEL + int(difficulty * 4)
-        last_x = INTERNAL_WIDTH // 4
+        last_x = ground.rect.right  # start from end of ground
         last_y = GROUND_Y
 
-        # Platform type weights change with difficulty
+        # Y-range for platform placement (stay within screen vertically)
+        y_min = GROUND_Y - 100
+        y_max = GROUND_Y
+
         bounce_chance = 0.1 + difficulty * 0.1
-        crumble_chance = 0.05 + difficulty * 0.2
+        crumble_chance = 0.03 + difficulty * 0.1
 
         for i in range(num_platforms):
-            # Calculate reachable area from last platform
-            gap_y = random.randint(
-                MIN_GAP_Y,
-                int(MAX_GAP_Y + difficulty * 10),
-            )
+            # Horizontal gap — always move RIGHT
             gap_x = random.randint(
-                int(MIN_GAP_X + difficulty * 8),
-                int(MAX_GAP_X + difficulty * 15),
+                int(MIN_GAP_X + difficulty * 3),
+                int(MAX_GAP_X + difficulty * 5),
             )
 
-            new_y = last_y - gap_y
-            direction = random.choice([-1, 1])
-            new_x = last_x + direction * gap_x
+            # Vertical variation — platforms go up AND down
+            y_shift = random.randint(-MAX_GAP_Y, MIN_GAP_Y)
+            new_y = last_y + y_shift
 
-            # Width gets narrower with difficulty
+            # Clamp Y so platforms stay within playable vertical band
+            new_y = max(y_min, min(y_max, new_y))
+
+            new_x = last_x + gap_x
+
+            # Platform width
             width = random.randint(
-                max(20, int(PLATFORM_MIN_WIDTH - difficulty * 10)),
-                max(30, int(PLATFORM_MAX_WIDTH - difficulty * 15)),
+                max(35, int(PLATFORM_MIN_WIDTH - difficulty * 4)),
+                max(50, int(PLATFORM_MAX_WIDTH - difficulty * 6)),
             )
-
-            # Keep within bounds with wrapping
-            new_x = new_x % (INTERNAL_WIDTH - width)
-            if new_x < 0:
-                new_x += INTERNAL_WIDTH - width
 
             # Determine platform type
             roll = random.random()
-            if roll < crumble_chance and i > 2:  # no crumbles near start
+            if roll < crumble_chance and i > 2:
                 ptype = "crumble"
             elif roll < crumble_chance + bounce_chance:
                 ptype = "bounce"
@@ -231,30 +228,32 @@ class LevelGenerator:
                 coin_y = int(new_y - 10)
                 self.coins.append(Coin(coin_x, coin_y))
 
-            last_x = int(new_x + width // 2)
+            last_x = int(new_x + width)  # next platform starts after this one ends
             last_y = int(new_y)
 
-        # Goal platform at the top
-        goal_y = last_y - MAX_GAP_Y
-        goal_x = random.randint(20, INTERNAL_WIDTH - 60)
+        # ── Goal platform at the far right ────────────────────────
+        goal_x = last_x + MAX_GAP_X
+        goal_y = last_y
         self.goal_platform = Platform(
-            goal_x, int(goal_y), 50, PLATFORM_HEIGHT, "goal"
+            int(goal_x), int(goal_y), 60, PLATFORM_HEIGHT, "goal"
         )
         self.platforms.append(self.goal_platform)
 
         # Coin on goal
-        self.coins.append(Coin(goal_x + 25, int(goal_y) - 10))
+        self.coins.append(Coin(int(goal_x) + 30, int(goal_y) - 10))
 
         # ── Spawn enemies on random platforms ─────────────────────
-        # Skip ground (index 0) and goal (last). Normal platforms only.
         eligible_plats = [
             p for p in self.platforms
             if p.platform_type == "normal" and p != ground and p != self.goal_platform
         ]
         random.shuffle(eligible_plats)
 
-        # Number of enemies scales with difficulty
-        num_enemies = min(len(eligible_plats), 1 + int(difficulty * 3))
+        # No enemies on level 1
+        if level_number <= 1:
+            num_enemies = 0
+        else:
+            num_enemies = min(len(eligible_plats), int(difficulty * 2))
         enemy_classes = [Dasher, Marksman, Hybrid]
 
         for i in range(num_enemies):
@@ -267,7 +266,7 @@ class LevelGenerator:
         # ── Spawn obstacles ──────────────────────────────────────
         remaining_plats = eligible_plats[num_enemies:]
         random.shuffle(remaining_plats)
-        num_obstacles = min(len(remaining_plats), 1 + int(difficulty * 2))
+        num_obstacles = min(len(remaining_plats), max(0, int(difficulty * 1.5)))
         for i in range(num_obstacles):
             plat = remaining_plats[i]
             ox = plat.rect.x + random.randint(2, max(3, plat.rect.width - OBSTACLE_WIDTH - 2))
@@ -277,7 +276,7 @@ class LevelGenerator:
         # ── Spawn weighted-random loot pickups ────────────────────
         loot_plats = remaining_plats[num_obstacles:]
         random.shuffle(loot_plats)
-        num_loot = min(len(loot_plats), 2 + int(difficulty * 2))
+        num_loot = min(len(loot_plats), 3 + int(difficulty * 2))
         for i in range(num_loot):
             plat = loot_plats[i]
             px = plat.rect.x + plat.rect.width // 2
@@ -294,7 +293,7 @@ class LevelGenerator:
             pu.update(dt)
 
     def draw(self, surface: pygame.Surface, cam_x: float, cam_y: float) -> None:
-        """Draw all platforms, coins, obstacles, enemies, and powerups."""
+        """Draw all platforms, coins, obstacles, and powerups."""
         for plat in self.platforms:
             plat.draw(surface, cam_x, cam_y)
         for coin in self.coins:
