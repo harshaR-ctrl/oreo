@@ -51,9 +51,9 @@ PLAYER_SPAWN_X: int = 40
 PLAYER_SPAWN_Y: int = 260
 
 # ─── Level Generation ────────────────────────────────────────────────
-PLATFORM_MIN_WIDTH: int = 45
-PLATFORM_MAX_WIDTH: int = 90
-PLATFORM_HEIGHT: int = 6
+PLATFORM_MIN_WIDTH: int = 200
+PLATFORM_MAX_WIDTH: int = 400
+PLATFORM_HEIGHT: int = 16
 MIN_GAP_X: int = 10
 MAX_GAP_X: int = 35
 MIN_GAP_Y: int = 14
@@ -70,9 +70,14 @@ PARTICLE_FRICTION: float = 0.96
 
 # ─── Colors (Curated palette — dark mode with neon accents) ──────────
 # Background & environment
-COL_BG: tuple = (12, 12, 20)
-COL_BG_GRADIENT_TOP: tuple = (8, 8, 18)
-COL_BG_GRADIENT_BOT: tuple = (18, 14, 28)
+COL_BG: tuple = (10, 25, 15)
+COL_BG_GRADIENT_TOP: tuple = (25, 45, 30)
+COL_BG_GRADIENT_BOT: tuple = (5, 15, 8)
+
+# Forest Tree Layers
+COL_TREE_L1: tuple = (15, 30, 20)
+COL_TREE_L2: tuple = (20, 40, 25)
+COL_TREE_L3: tuple = (25, 50, 30)
 
 # Platforms
 COL_PLATFORM: tuple = (45, 50, 70)
@@ -115,8 +120,8 @@ ENEMY_WIDTH: int = 10
 ENEMY_HEIGHT: int = 12
 
 # ─── Obstacles ────────────────────────────────────────────────────────
-OBSTACLE_WIDTH: int = 8
-OBSTACLE_HEIGHT: int = 8
+OBSTACLE_WIDTH: int = 24
+OBSTACLE_HEIGHT: int = 24
 
 # ─── Enemy & Entity Colors ───────────────────────────────────────────
 COL_DASHER: tuple = (220, 60, 60)

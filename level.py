@@ -199,12 +199,6 @@ class LevelGenerator:
 
             new_x = self._frontier_x + gap_x
 
-            # Platform width
-            width = random.randint(
-                max(35, int(PLATFORM_MIN_WIDTH - difficulty * 4)),
-                max(50, int(PLATFORM_MAX_WIDTH - difficulty * 6)),
-            )
-
             # Platform type
             roll = random.random()
             if roll < crumble_chance and self._platforms_generated > 5:
@@ -213,6 +207,15 @@ class LevelGenerator:
                 ptype = "bounce"
             else:
                 ptype = "normal"
+
+            # Platform width
+            if ptype == "crumble":
+                width = random.randint(35, 80) # Short, snappy width for brown platforms
+            else:
+                width = random.randint(
+                    max(35, int(PLATFORM_MIN_WIDTH - difficulty * 4)),
+                    max(50, int(PLATFORM_MAX_WIDTH - difficulty * 6)),
+                )
 
             plat = Platform(int(new_x), int(new_y), width, PLATFORM_HEIGHT, ptype)
             self.platforms.append(plat)
@@ -232,7 +235,18 @@ class LevelGenerator:
                 ecls = random.choice(enemy_classes)
                 self.enemies.append(ecls(ex, ey))
 
-
+            # Obstacle logic
+            if ptype == "normal" and width > 120 and self._platforms_generated > 2:
+                # Up to 2 obstacles on wide platforms
+                if random.random() < 0.4 + difficulty * 0.2:
+                    ox = int(new_x) + random.randint(15, 30)
+                    oy = int(new_y) - OBSTACLE_HEIGHT
+                    self.obstacles.append(Obstacle(ox, oy))
+                
+                if width > 200 and random.random() < 0.4 + difficulty * 0.2:
+                    ox = int(new_x) + width - random.randint(15 + OBSTACLE_WIDTH, 30 + OBSTACLE_WIDTH)
+                    oy = int(new_y) - OBSTACLE_HEIGHT
+                    self.obstacles.append(Obstacle(ox, oy))
 
             # Loot every ~5th platform
             if self._platforms_generated % 5 == 0:

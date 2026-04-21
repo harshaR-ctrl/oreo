@@ -12,33 +12,63 @@ import pygame
 from settings import (
     INTERNAL_WIDTH, INTERNAL_HEIGHT, WINDOW_WIDTH, WINDOW_HEIGHT,
     COL_BG, COL_BG_GRADIENT_TOP, COL_BG_GRADIENT_BOT,
+    COL_TREE_L1, COL_TREE_L2, COL_TREE_L3
 )
 
 
-class StarField:
-    """Simple parallax starfield for the background."""
+class ForestBackground:
+    """Parallax forest background for the scene."""
 
-    def __init__(self, count: int = 60) -> None:
-        self.stars: list[tuple[float, float, float, int]] = []
+    def __init__(self, count: int = 40) -> None:
+        self.trees: list[tuple[float, float, float, tuple[int, int, int], float, float]] = []
         for _ in range(count):
             x = random.uniform(0, INTERNAL_WIDTH)
-            y = random.uniform(0, INTERNAL_HEIGHT * 3)
-            depth = random.uniform(0.1, 0.5)
-            brightness = random.randint(30, 90)
-            self.stars.append((x, y, depth, brightness))
+            # Trees are anchored lower on the screen
+            speed_layer = random.choice([1, 2, 3])
+            if speed_layer == 1:
+                depth = 0.2
+                color = COL_TREE_L1
+                width = random.uniform(20, 30)
+                height = random.uniform(100, 160)
+            elif speed_layer == 2:
+                depth = 0.4
+                color = COL_TREE_L2
+                width = random.uniform(25, 35)
+                height = random.uniform(120, 180)
+            else:
+                depth = 0.6
+                color = COL_TREE_L3
+                width = random.uniform(30, 45)
+                height = random.uniform(140, 200)
+            
+            # y offset anchor
+            y = INTERNAL_HEIGHT
+
+            self.trees.append((x, y, depth, color, width, height))
+
+        # Sort by depth so back trees draw first
+        self.trees.sort(key=lambda t: t[2])
 
     def draw(
         self, surface: pygame.Surface, cam_x: float, cam_y: float, time: float
     ) -> None:
-        """Draw parallax stars that scroll with the camera."""
-        for sx, sy, depth, brightness in self.stars:
-            px = int(sx - cam_x * depth * 0.3) % INTERNAL_WIDTH
-            py = int(sy - cam_y * depth) % (INTERNAL_HEIGHT + 100) - 50
-            # Slight twinkle
-            twinkle = int(brightness + 20 * ((hash((sx, sy)) + time * 2) % 1))
-            twinkle = max(20, min(100, twinkle))
-            color = (twinkle, twinkle, twinkle + 15)
-            surface.set_at((px % INTERNAL_WIDTH, py % INTERNAL_HEIGHT), color)
+        """Draw parallax trees that scroll with the camera."""
+        for sx, sy, depth, color, width, height in self.trees:
+            px = int(sx - cam_x * depth * 0.3) % (INTERNAL_WIDTH + 100) - 50
+            # Camera mostly pans horizontally, slight vertical parallax
+            py = int(sy - cam_y * depth * 0.2 + 20)
+            
+            # Draw tree trunk as an abstract rectangle
+            rect = pygame.Rect(px - width//2, py - height, width, height)
+            pygame.draw.rect(surface, color, rect)
+            
+            # Draw a simple triangle canopy on top
+            points = [
+                (px - width, py - height + 20),
+                (px, py - height - width * 1.5),
+                (px + width, py - height + 20)
+            ]
+            pygame.draw.polygon(surface, color, points)
 
 
 class Renderer:
@@ -49,7 +79,7 @@ class Renderer:
         self.internal_surface: pygame.Surface = pygame.Surface(
             (INTERNAL_WIDTH, INTERNAL_HEIGHT)
         )
-        self.starfield: StarField = StarField(80)
+        self.forest: ForestBackground = ForestBackground(40)
         self._bg_surface: pygame.Surface = self._create_gradient()
 
     def _create_gradient(self) -> pygame.Surface:
@@ -66,7 +96,7 @@ class Renderer:
     def begin_frame(self, cam_x: float, cam_y: float, time: float) -> pygame.Surface:
         """Clear the internal surface with background. Returns it for drawing."""
         self.internal_surface.blit(self._bg_surface, (0, 0))
-        self.starfield.draw(self.internal_surface, cam_x, cam_y, time)
+        self.forest.draw(self.internal_surface, cam_x, cam_y, time)
         return self.internal_surface
 
     def end_frame(self) -> None:
