@@ -3,7 +3,7 @@ input_handler.py — Decoupled input abstraction.
 
 Separates raw Pygame key events from game logic. Provides semantic
 methods like move_direction(), jump_pressed(), dash_pressed() instead
-of exposing raw key codes to the game systems.
+of exposing raw key codes to the game systems. Includes menu navigation.
 """
 
 from __future__ import annotations
@@ -119,6 +119,50 @@ class InputHandler:
     def weapon_switch_pressed(self) -> bool:
         """True on the frame Q is first pressed (cycle weapons)."""
         return self._just_pressed(pygame.K_q)
+
+    # ── Menu Navigation ──────────────────────────────────────────────
+
+    def menu_up(self) -> bool:
+        """True when Up or W is pressed in menu."""
+        return (
+            self._just_pressed(pygame.K_UP)
+            or self._just_pressed(pygame.K_w)
+        )
+
+    def menu_down(self) -> bool:
+        """True when Down or S is pressed in menu."""
+        return (
+            self._just_pressed(pygame.K_DOWN)
+            or self._just_pressed(pygame.K_s)
+        )
+
+    def menu_left(self) -> bool:
+        """True when Left or A is pressed in menu."""
+        return (
+            self._just_pressed(pygame.K_LEFT)
+            or self._just_pressed(pygame.K_a)
+        )
+
+    def menu_right(self) -> bool:
+        """True when Right or D is pressed in menu."""
+        return (
+            self._just_pressed(pygame.K_RIGHT)
+            or self._just_pressed(pygame.K_d)
+        )
+
+    def pause_pressed(self) -> bool:
+        """True when ESC or P is pressed (toggle pause)."""
+        return (
+            self._just_pressed(pygame.K_ESCAPE)
+            or self._just_pressed(pygame.K_p)
+        )
+
+    def back_pressed(self) -> bool:
+        """True when ESC or Backspace is pressed (go back in menus)."""
+        return (
+            self._just_pressed(pygame.K_ESCAPE)
+            or self._just_pressed(pygame.K_BACKSPACE)
+        )
 
     # ── Raw key helpers ──────────────────────────────────────────────
 

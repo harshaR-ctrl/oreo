@@ -2,8 +2,8 @@
 enemies.py — Enemy types: Dasher, Marksman, Hybrid.
 
 All enemies inherit from pygame.sprite.Sprite.
-Now includes optimized edge detection and obstacle avoidance so enemies
-don't blindly fall off platforms and vanish.
+Features optimized edge detection and obstacle avoidance,
+along with improved visual designs for each enemy type.
 """
 
 from __future__ import annotations
@@ -80,7 +80,11 @@ def _can_move_x(
 # ─── Dasher ───────────────────────────────────────────────────────────
 
 class Dasher(pygame.sprite.Sprite):
-    """Chases the player, but respects platform edges and obstacles."""
+    """Chases the player, but respects platform edges and obstacles.
+    Visual: Spiky aggressive shape with angry eyes.
+    """
+
+    ENEMY_TYPE: str = "dasher"
 
     def __init__(self, x: int, y: int) -> None:
         super().__init__()
@@ -91,6 +95,7 @@ class Dasher(pygame.sprite.Sprite):
         self.facing = -1.0
         self.speed = DASHER_SPEED
         self.alive = True
+        self.bob_timer: float = 0.0
 
     def update(
         self,
@@ -102,6 +107,8 @@ class Dasher(pygame.sprite.Sprite):
     ) -> None:
         if not self.alive:
             return
+
+        self.bob_timer += dt * 6.0
 
         # Gravity & Floor
         on_ground = _apply_gravity_and_floor(self, platforms, dt)
@@ -122,15 +129,44 @@ class Dasher(pygame.sprite.Sprite):
         if not self.alive:
             return
         sx, sy = int(self.position.x - cam_x), int(self.position.y - cam_y)
-        body_rect = pygame.Rect(sx, sy, ENEMY_WIDTH, ENEMY_HEIGHT)
+        
+        # Idle bob
+        bob = int(math.sin(self.bob_timer) * 1)
+        sy += bob
+        
+        # Body - spiky shape
+        body_rect = pygame.Rect(sx, sy + 2, ENEMY_WIDTH, ENEMY_HEIGHT - 2)
         pygame.draw.rect(surface, COL_DASHER, body_rect)
+        
+        # Spikes on top
+        spike_color = (180, 40, 40)
+        for i in range(3):
+            spike_x = sx + 2 + i * 3
+            spike_points = [
+                (spike_x, sy + 3),
+                (spike_x + 1, sy - 1),
+                (spike_x + 2, sy + 3),
+            ]
+            pygame.draw.polygon(surface, spike_color, spike_points)
+        
+        # Outline
         pygame.draw.rect(surface, (140, 30, 30), body_rect, 1)
 
-        eye_y = sy + ENEMY_HEIGHT // 3
+        # Angry eyes
+        eye_y = sy + ENEMY_HEIGHT // 3 + 2
         eye_x = sx + ENEMY_WIDTH // 2 + int(self.facing * 1)
         eye_size = max(1, ENEMY_WIDTH // 5)
         pygame.draw.rect(surface, COL_DASHER_EYE, (eye_x - 2, eye_y, eye_size, eye_size))
         pygame.draw.rect(surface, COL_DASHER_EYE, (eye_x + 2, eye_y, eye_size, eye_size))
+        
+        # Angry eyebrows
+        brow_y = eye_y - 1
+        if self.facing > 0:
+            pygame.draw.line(surface, (140, 30, 30), (eye_x - 3, brow_y), (eye_x - 1, brow_y - 1), 1)
+            pygame.draw.line(surface, (140, 30, 30), (eye_x + 1, brow_y), (eye_x + 3, brow_y - 1), 1)
+        else:
+            pygame.draw.line(surface, (140, 30, 30), (eye_x - 3, brow_y - 1), (eye_x - 1, brow_y), 1)
+            pygame.draw.line(surface, (140, 30, 30), (eye_x + 1, brow_y - 1), (eye_x + 3, brow_y), 1)
 
     def get_fire_request(self) -> dict | None:
         return None
@@ -143,7 +179,11 @@ class MarksmanState:
     FIRING = "firing"
 
 class Marksman(pygame.sprite.Sprite):
-    """Stationary sniper with predictive aim and telegraph flash."""
+    """Stationary sniper with predictive aim and telegraph flash.
+    Visual: Scope/antenna on top with a single glowing eye.
+    """
+
+    ENEMY_TYPE: str = "marksman"
 
     def __init__(self, x: int, y: int) -> None:
         super().__init__()
@@ -153,6 +193,7 @@ class Marksman(pygame.sprite.Sprite):
         self.velocity = pygame.Vector2(0, 0)
         self.facing = -1.0
         self.alive = True
+        self.bob_timer: float = 0.0
 
         self.state = MarksmanState.IDLE
         self.cooldown_timer = MARKSMAN_COOLDOWN
@@ -171,6 +212,7 @@ class Marksman(pygame.sprite.Sprite):
         if not self.alive:
             return
         self._pending_fire = None
+        self.bob_timer += dt * 3.0
 
         dx = player_pos.x - self.position.x
         self.facing = 1.0 if dx >= 0 else -1.0
@@ -217,20 +259,35 @@ class Marksman(pygame.sprite.Sprite):
         if not self.alive:
             return
         sx, sy = int(self.position.x - cam_x), int(self.position.y - cam_y)
+        bob = int(math.sin(self.bob_timer) * 0.5)
+        sy += bob
 
         if self.state == MarksmanState.FLASHING:
             body_color, outline_color = COL_MARKSMAN_FLASH, (200, 200, 200)
         else:
             body_color, outline_color = COL_MARKSMAN, (100, 40, 140)
 
-        body_rect = pygame.Rect(sx, sy, ENEMY_WIDTH, ENEMY_HEIGHT)
+        body_rect = pygame.Rect(sx, sy + 2, ENEMY_WIDTH, ENEMY_HEIGHT - 2)
         pygame.draw.rect(surface, outline_color, body_rect.inflate(2, 2))
         pygame.draw.rect(surface, body_color, body_rect)
 
-        eye_y = sy + ENEMY_HEIGHT // 3
-        eye_x = sx + ENEMY_WIDTH // 2 + int(self.facing * 2)
-        pygame.draw.circle(surface, COL_MARKSMAN_EYE, (eye_x, eye_y), 2)
+        # Antenna / scope on top
+        antenna_x = sx + ENEMY_WIDTH // 2
+        antenna_top = sy - 2
+        pygame.draw.line(surface, (180, 140, 220), (antenna_x, sy + 2), (antenna_x, antenna_top), 1)
+        # Scope circle at top of antenna
+        scope_color = (255, 120, 255) if self.state != MarksmanState.FLASHING else (255, 60, 60)
+        pygame.draw.circle(surface, scope_color, (antenna_x, antenna_top), 2)
+        pygame.draw.circle(surface, (255, 255, 255), (antenna_x, antenna_top), 1)
 
+        # Single cyclops eye
+        eye_y = sy + ENEMY_HEIGHT // 3 + 2
+        eye_x = sx + ENEMY_WIDTH // 2 + int(self.facing * 2)
+        eye_color = (255, 60, 60) if self.state == MarksmanState.FLASHING else COL_MARKSMAN_EYE
+        pygame.draw.circle(surface, eye_color, (eye_x, eye_y), 2)
+        pygame.draw.circle(surface, (255, 255, 255), (eye_x, eye_y), 1)
+
+        # Aim line during flash
         if self.state == MarksmanState.FLASHING:
             ox, oy = sx + ENEMY_WIDTH // 2, sy + ENEMY_HEIGHT // 2
             tx, ty = int(self.locked_target.x - cam_x), int(self.locked_target.y - cam_y)
@@ -242,7 +299,11 @@ class Marksman(pygame.sprite.Sprite):
 # ─── Hybrid ───────────────────────────────────────────────────────────
 
 class Hybrid(pygame.sprite.Sprite):
-    """Moves like a Dasher but stops at edges, periodically fires straight."""
+    """Moves like a Dasher but stops at edges, periodically fires straight.
+    Visual: Larger, armored appearance with shoulder pads.
+    """
+
+    ENEMY_TYPE: str = "hybrid"
 
     def __init__(self, x: int, y: int) -> None:
         super().__init__()
@@ -255,6 +316,7 @@ class Hybrid(pygame.sprite.Sprite):
         self.alive = True
         self.fire_timer = HYBRID_FIRE_COOLDOWN
         self._pending_fire = None
+        self.bob_timer: float = 0.0
 
     def update(
         self,
@@ -267,6 +329,7 @@ class Hybrid(pygame.sprite.Sprite):
         if not self.alive:
             return
         self._pending_fire = None
+        self.bob_timer += dt * 4.0
 
         on_ground = _apply_gravity_and_floor(self, platforms, dt)
 
@@ -296,12 +359,30 @@ class Hybrid(pygame.sprite.Sprite):
         if not self.alive:
             return
         sx, sy = int(self.position.x - cam_x), int(self.position.y - cam_y)
+        bob = int(math.sin(self.bob_timer) * 0.8)
+        sy += bob
 
-        body_rect = pygame.Rect(sx, sy, ENEMY_WIDTH, ENEMY_HEIGHT)
+        # Main body
+        body_rect = pygame.Rect(sx, sy + 2, ENEMY_WIDTH, ENEMY_HEIGHT - 2)
         pygame.draw.rect(surface, (160, 90, 20), body_rect.inflate(2, 2))
         pygame.draw.rect(surface, COL_HYBRID, body_rect)
 
-        eye_y = sy + ENEMY_HEIGHT // 3
+        # Shoulder pads / armor plates
+        armor_color = (200, 120, 30)
+        # Left shoulder
+        pygame.draw.rect(surface, armor_color, (sx - 2, sy + 1, 3, 4))
+        # Right shoulder
+        pygame.draw.rect(surface, armor_color, (sx + ENEMY_WIDTH - 1, sy + 1, 3, 4))
+        
+        # Fire indicator (glow when about to fire)
+        if self.fire_timer < 0.8:
+            glow_alpha = int((1.0 - self.fire_timer / 0.8) * 150)
+            glow_surf = pygame.Surface((ENEMY_WIDTH + 4, ENEMY_HEIGHT + 4), pygame.SRCALPHA)
+            pygame.draw.rect(glow_surf, (255, 100, 20, glow_alpha), (0, 0, ENEMY_WIDTH + 4, ENEMY_HEIGHT + 4))
+            surface.blit(glow_surf, (sx - 2, sy))
+
+        # Eyes
+        eye_y = sy + ENEMY_HEIGHT // 3 + 2
         eye_x = sx + ENEMY_WIDTH // 2 + int(self.facing * 1)
         eye_size = max(1, ENEMY_WIDTH // 5)
         pygame.draw.rect(surface, COL_HYBRID_EYE, (eye_x - 2, eye_y, eye_size, eye_size))

@@ -3,7 +3,7 @@ player.py — Player controller with kinematic movement.
 
 Implements variable jump height, coyote time, jump buffering,
 momentum-based dash, lives system, state-driven powerup manager,
-and weapon strategy pattern. Uses Vector2 for all movement math.
+and weapon strategy pattern. Features Oreo-themed character design.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from settings import (
     DASH_SPEED, MOMENTUM_FACTOR, DASH_COOLDOWN, DASH_DURATION,
     COYOTE_FRAMES, JUMP_BUFFER_FRAMES,
     COL_PLAYER_BODY, COL_PLAYER_OUTLINE, COL_PLAYER_DASH, COL_PLAYER_EYE,
-    COL_SHIELD_RING,
+    COL_SHIELD_RING, COL_OREO_DARK, COL_OREO_CREAM, COL_OREO_OUTLINE,
     FPS, PLAYER_SHOOT_COOLDOWN,
     MAX_LIVES, DAMAGE_INVINCIBILITY, MAX_RUN_SPEED,
     WEAPON_TYPES, WEAPON_ORDER,
@@ -50,7 +50,7 @@ _POWERUP_DURATIONS: dict[str, int] = {
 
 
 class Player:
-    """The player character with full kinematic movement."""
+    """The player character with full kinematic movement and Oreo visuals."""
 
     def __init__(self, physics: PhysicsEngine, particles: ParticleSystem) -> None:
         self.position: pygame.Vector2 = pygame.Vector2(PLAYER_SPAWN_X, PLAYER_SPAWN_Y)
@@ -101,6 +101,9 @@ class Player:
         # Visual
         self.squash_stretch: float = 1.0  # 1.0 = normal, <1 = squash, >1 = stretch
         self.eye_target_x: float = 0.0
+        self.run_anim_timer: float = 0.0
+        self.invuln_flash_timer: float = 0.0
+        self.roll_angle: float = 0.0  # accumulates rotation in degrees
 
     @property
     def rect(self) -> pygame.Rect:
@@ -134,7 +137,7 @@ class Player:
         self.state = PlayerState.IDLE
         self.on_ground = False
         self.alive = True
-        self.lives = MAX_LIVES
+        self.lives = self.max_lives
         self.invincible = False
         self.invincible_timer = 0.0
         self.coyote_counter = 0
@@ -153,6 +156,9 @@ class Player:
         self.speed_multiplier = 1.0
         self.shield_active = False
         self.squash_stretch = 1.0
+        self.run_anim_timer = 0.0
+        self.invuln_flash_timer = 0.0
+        self.roll_angle = 0.0
 
     # ── Lives & Damage ───────────────────────────────────────────────
 
@@ -295,9 +301,11 @@ class Player:
         # ── Update invincibility timer ───────────────────────────
         if self.invincible and not self.shield_active:
             self.invincible_timer -= dt
+            self.invuln_flash_timer += dt
             if self.invincible_timer <= 0:
                 self.invincible = False
                 self.invincible_timer = 0.0
+                self.invuln_flash_timer = 0.0
 
         # ── Effective speed ──────────────────────────────────────
         effective_accel = ACCELERATION * self.speed_multiplier
@@ -424,6 +432,10 @@ class Player:
             events["died"] = True
             self.particles.emit_death_burst(self.center_x, self.center_y)
 
+        # ── Speed lines ──────────────────────────────────────────
+        if abs(self.velocity.x) > 100:
+            self.particles.emit_speed_lines(self.center_x, self.center_y, self.velocity.x)
+
         self._update_visual_state(inp, dt)
         return events
 
@@ -464,9 +476,33 @@ class Player:
                 self.particles.emit_wall_hit(wx, self.center_y)
 
     def _update_visual_state(self, inp: InputHandler, dt: float) -> None:
-        """Update animation state and squash/stretch."""
+        """Update animation state, squash/stretch, and roll angle."""
         # Recover squash/stretch toward 1.0
         self.squash_stretch += (1.0 - self.squash_stretch) * min(1.0, dt * 12)
+
+        # Run animation timer
+        if abs(self.velocity.x) > 5 and self.on_ground:
+            self.run_anim_timer += dt * abs(self.velocity.x) * 0.08
+        else:
+            self.run_anim_timer = 0.0
+
+        # ── Rolling rotation ─────────────────────────────────────
+        # angle = distance / radius  (radians), converted to degrees.
+        # The Oreo radius is roughly half of PLAYER_WIDTH (~5px).
+        radius = self.width / 2.0
+        if self.on_ground or self.is_dashing:
+            # Full roll speed on ground / dashing
+            distance = self.velocity.x * dt
+            angle_delta_deg = math.degrees(distance / radius) if radius > 0 else 0
+            self.roll_angle += angle_delta_deg
+        else:
+            # In air: slow spin for floaty feel (20% of ground speed)
+            distance = self.velocity.x * dt * 0.2
+            angle_delta_deg = math.degrees(distance / radius) if radius > 0 else 0
+            self.roll_angle += angle_delta_deg
+
+        # Keep angle in 0-360 range
+        self.roll_angle %= 360.0
 
         if self.is_dashing:
             self.state = PlayerState.DASHING
@@ -477,70 +513,163 @@ class Player:
         else:
             self.state = PlayerState.IDLE
 
+    def _build_oreo_surface(
+        self, radius: int,
+        dark_color: tuple, cream_color: tuple,
+    ) -> pygame.Surface:
+        """Build the Oreo cookie sprite at given radius (unrotated).
+
+        The cookie is a circle with:
+          - Dark biscuit as the main fill
+          - A horizontal cream band through the center
+          - Texture dots on the biscuit
+          - Two eyes on the cream band
+        """
+        size = radius * 2 + 2  # +2 for anti-alias breathing room
+        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        cx, cy = size // 2, size // 2
+
+        # ── Outline shadow ─────────────────────────────────
+        pygame.draw.circle(surf, COL_OREO_OUTLINE, (cx, cy), radius + 1)
+
+        # ── Dark biscuit fill ──────────────────────────────
+        pygame.draw.circle(surf, dark_color, (cx, cy), radius)
+
+        # ── Cream band (horizontal stripe through center) ─
+        band_h = max(3, radius * 2 // 3)  # cream is ~1/3 of diameter
+        cream_rect = pygame.Rect(cx - radius, cy - band_h // 2, radius * 2, band_h)
+        # Fast circle-clipped cream band using alpha blending
+        cream_surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.rect(cream_surf, (*cream_color, 255), cream_rect)
+        # Create circle mask for clipping
+        mask_surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(mask_surf, (255, 255, 255, 255), (cx, cy), radius)
+        # Use the mask to clip cream to circle shape
+        cream_surf.blit(mask_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+        surf.blit(cream_surf, (0, 0))
+
+        # ── Texture dots on biscuit (above and below cream) ─
+        dot_color = (
+            min(255, dark_color[0] + 20),
+            min(255, dark_color[1] + 20),
+            min(255, dark_color[2] + 20),
+        )
+        # Top arc dots
+        for angle_deg in range(-60, 61, 30):
+            a = math.radians(angle_deg - 90)  # -90 so 0° = top
+            dx = int(math.cos(a) * (radius - 2))
+            dy = int(math.sin(a) * (radius - 2))
+            dot_x, dot_y = cx + dx, cy + dy
+            if 0 <= dot_x < size and 0 <= dot_y < size:
+                surf.set_at((dot_x, dot_y), dot_color)
+        # Bottom arc dots
+        for angle_deg in range(-60, 61, 30):
+            a = math.radians(angle_deg + 90)  # +90 = bottom
+            dx = int(math.cos(a) * (radius - 2))
+            dy = int(math.sin(a) * (radius - 2))
+            dot_x, dot_y = cx + dx, cy + dy
+            if 0 <= dot_x < size and 0 <= dot_y < size:
+                surf.set_at((dot_x, dot_y), dot_color)
+
+        # ── Eyes on the cream band ─────────────────────────
+        eye_y = cy
+        eye_spacing = max(2, radius // 2)
+        # Left eye
+        pygame.draw.circle(surf, COL_PLAYER_EYE, (cx - eye_spacing + 1, eye_y), 2)
+        surf.set_at((cx - eye_spacing + 1, eye_y), (0, 0, 0))  # pupil
+        # Right eye
+        pygame.draw.circle(surf, COL_PLAYER_EYE, (cx + eye_spacing - 1, eye_y), 2)
+        surf.set_at((cx + eye_spacing - 1, eye_y), (0, 0, 0))  # pupil
+
+        return surf
+
     def draw(self, surface: pygame.Surface, cam_x: float, cam_y: float) -> None:
-        """Draw the player character with squash/stretch, eyes, and shield."""
+        """Draw the rolling Oreo cookie with rotation, squash/stretch, and effects."""
         if not self.alive:
             return
 
-        # Invincibility flash: blink every 100ms during i-frames
+        # Invincibility flash: color cycling instead of simple blink
         if self.invincible and not self.shield_active:
-            if int(pygame.time.get_ticks() / 100) % 2 == 0:
-                return  # skip drawing this frame (blink)
+            flash_phase = int(self.invuln_flash_timer * 12.5) % 3
+            if flash_phase == 2:
+                return  # Brief invisible frame
 
+        # Screen position
         sx = int(self.position.x - cam_x)
         sy = int(self.position.y - cam_y)
 
-        # Apply squash/stretch
-        draw_w = int(self.width * (2.0 - self.squash_stretch))
-        draw_h = int(self.height * self.squash_stretch)
-        offset_x = (self.width - draw_w) // 2
-        offset_y = self.height - draw_h
-
-        body_rect = pygame.Rect(sx + offset_x, sy + offset_y, draw_w, draw_h)
-
-        # Choose color based on state
+        # ── Choose colors based on state ─────────────────────
         if self.is_dashing:
-            body_color = COL_PLAYER_DASH
+            dark_color = COL_PLAYER_DASH
+            cream_color = (220, 180, 255)
         elif self.has_powerup("dash"):
-            body_color = (255, 220, 100)  # golden tint during speed boost
+            dark_color = (180, 140, 40)  # golden oreo
+            cream_color = (255, 240, 180)
+        elif self.invincible and not self.shield_active:
+            flash_phase = int(self.invuln_flash_timer * 12.5) % 3
+            if flash_phase == 0:
+                dark_color = (255, 100, 100)
+                cream_color = (255, 200, 200)
+            else:
+                dark_color = COL_OREO_DARK
+                cream_color = COL_OREO_CREAM
         else:
-            body_color = COL_PLAYER_BODY
+            dark_color = COL_OREO_DARK
+            cream_color = COL_OREO_CREAM
 
-        # Outline
-        outline_rect = body_rect.inflate(2, 2)
-        pygame.draw.rect(surface, COL_PLAYER_OUTLINE, outline_rect)
-        # Body
-        pygame.draw.rect(surface, body_color, body_rect)
+        # ── Build the cookie sprite ──────────────────────────
+        # Use the larger dimension to determine radius for a nice round cookie
+        base_radius = max(self.width, self.height) // 2 + 1  # ~8px
+        oreo_surf = self._build_oreo_surface(base_radius, dark_color, cream_color)
 
-        # Eyes
-        eye_y = sy + offset_y + draw_h // 3
-        eye_base_x = sx + offset_x + draw_w // 2
-        eye_offset = int(self.facing * 2)
+        # ── Apply squash/stretch as scale ─────────────────────
+        oreo_w = oreo_surf.get_width()
+        oreo_h = oreo_surf.get_height()
+        stretch_w = max(4, int(oreo_w * (2.0 - self.squash_stretch)))
+        stretch_h = max(4, int(oreo_h * self.squash_stretch))
+        stretched = pygame.transform.scale(oreo_surf, (stretch_w, stretch_h))
 
-        # Two small eye dots
-        eye_size = max(1, draw_w // 5)
-        pygame.draw.rect(
-            surface, COL_PLAYER_EYE,
-            (eye_base_x + eye_offset - 2, eye_y, eye_size, eye_size),
-        )
-        pygame.draw.rect(
-            surface, COL_PLAYER_EYE,
-            (eye_base_x + eye_offset + 2, eye_y, eye_size, eye_size),
-        )
+        # ── Rotate by roll_angle ──────────────────────────────
+        # Negative because pygame rotation is counter-clockwise
+        rotated = pygame.transform.rotate(stretched, -self.roll_angle)
+
+        # ── Position: center the rotated surface on the player ─
+        rot_rect = rotated.get_rect()
+        center_x = sx + self.width // 2
+        center_y = sy + self.height // 2
+        # Run bob
+        run_bob = 0
+        if self.state == PlayerState.RUNNING:
+            run_bob = int(math.sin(self.run_anim_timer) * 1.5)
+        center_y += run_bob
+
+        rot_rect.center = (center_x, center_y)
+        surface.blit(rotated, rot_rect.topleft)
 
         # ── Shield visual ────────────────────────────────────────
         if self.shield_active:
             shield_r = 12
-            cx = sx + self.width // 2
-            cy = sy + self.height // 2
-            # Create alpha surface for semi-transparent shield
             shield_surf = pygame.Surface((shield_r * 2 + 4, shield_r * 2 + 4), pygame.SRCALPHA)
+            pulse = 0.7 + 0.3 * math.sin(pygame.time.get_ticks() * 0.008)
+            alpha_fill = int(40 * pulse)
+            alpha_ring = int(100 * pulse)
             pygame.draw.circle(
-                shield_surf, (*COL_SHIELD_RING, 50),
+                shield_surf, (*COL_SHIELD_RING, alpha_fill),
                 (shield_r + 2, shield_r + 2), shield_r,
             )
             pygame.draw.circle(
-                shield_surf, (*COL_SHIELD_RING, 120),
+                shield_surf, (*COL_SHIELD_RING, alpha_ring),
                 (shield_r + 2, shield_r + 2), shield_r, 1,
             )
-            surface.blit(shield_surf, (cx - shield_r - 2, cy - shield_r - 2))
+            surface.blit(shield_surf, (center_x - shield_r - 2, center_y - shield_r - 2))
+
+        # ── Speed trail during speed boost ───────────────────────
+        if self.has_powerup("dash") and abs(self.velocity.x) > 50:
+            trail_color = (255, 200, 60)
+            for i in range(3):
+                trail_x = center_x - int(self.facing * (6 + i * 3))
+                trail_y = center_y + random.randint(-2, 2)
+                trail_alpha = 80 - i * 25
+                trail_surf = pygame.Surface((2, 2), pygame.SRCALPHA)
+                trail_surf.fill((*trail_color, max(0, trail_alpha)))
+                surface.blit(trail_surf, (trail_x, trail_y))

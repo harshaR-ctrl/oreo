@@ -3,9 +3,13 @@ settings.py — Central configuration for Micro-Platformer.
 
 All physics constants, display settings, colors, and game-feel tuning
 parameters live here. Changing these values affects the entire game.
+Includes difficulty presets and combo/milestone thresholds.
 """
 
 import pygame
+
+# ─── Game Info ─────────────────────────────────────────────────────────
+GAME_VERSION: str = "2.0.0"
 
 # ─── Display ──────────────────────────────────────────────────────────
 INTERNAL_WIDTH: int = 400
@@ -13,7 +17,7 @@ INTERNAL_HEIGHT: int = 300
 WINDOW_WIDTH: int = 800
 WINDOW_HEIGHT: int = 600
 FPS: int = 60
-GAME_TITLE: str = "MICRO-PLATFORMER"
+GAME_TITLE: str = "OREO RUNNER"
 
 # ─── Physics ──────────────────────────────────────────────────────────
 GRAVITY: float = 980.0               # px/s²
@@ -71,7 +75,7 @@ PARTICLE_FRICTION: float = 0.96
 # ─── Colors (Curated palette — dark mode with neon accents) ──────────
 # Background & environment
 COL_BG: tuple = (10, 25, 15)
-COL_BG_GRADIENT_TOP: tuple = (25, 45, 30)
+COL_BG_GRADIENT_TOP: tuple = (18, 10, 35)
 COL_BG_GRADIENT_BOT: tuple = (5, 15, 8)
 
 # Forest Tree Layers
@@ -92,6 +96,11 @@ COL_PLAYER_OUTLINE: tuple = (40, 100, 160)
 COL_PLAYER_DASH: tuple = (180, 120, 255)
 COL_PLAYER_EYE: tuple = (255, 255, 255)
 
+# Oreo themed colors
+COL_OREO_DARK: tuple = (35, 25, 20)
+COL_OREO_CREAM: tuple = (240, 230, 210)
+COL_OREO_OUTLINE: tuple = (20, 15, 10)
+
 # Particles
 COL_DUST: tuple = (160, 160, 180)
 COL_JUMP_DUST: tuple = (100, 180, 255)
@@ -106,6 +115,8 @@ COL_TEXT_DIM: tuple = (120, 120, 140)
 COL_TEXT_ACCENT: tuple = (100, 220, 255)
 COL_HUD_BG: tuple = (12, 12, 20, 180)
 COL_MENU_PARTICLE: tuple = (60, 70, 100)
+COL_MENU_SELECTED: tuple = (255, 200, 60)
+COL_MENU_UNSELECTED: tuple = (140, 140, 160)
 
 # ─── Enemies ──────────────────────────────────────────────────────────
 DASHER_SPEED: float = MAX_RUN_SPEED * 0.5  # slower chase (was 0.7)
@@ -189,3 +200,75 @@ COL_WEAPON_PICKUP: tuple = (100, 255, 200)
 SOUND_ENABLED: bool = True
 SAMPLE_RATE: int = 22050
 SOUND_VOLUME: float = 0.3
+MUSIC_VOLUME: float = 0.15
+
+# ─── Combo & Milestone System ────────────────────────────────────────
+COMBO_WINDOW: float = 3.0            # seconds to chain kills
+COMBO_BONUS_PER_LEVEL: int = 50      # extra points per combo level
+MILESTONE_DISTANCES: list = [100, 250, 500, 1000, 2000, 5000]
+MILESTONE_BONUS: int = 250           # points per milestone
+
+# ─── Difficulty Presets ───────────────────────────────────────────────
+# Each preset is a dict of multipliers applied to base values.
+# Keys: lives, enemy_speed, enemy_fire_rate, obstacle_density,
+#        powerup_frequency, platform_width, gap_size, score_mult
+DIFFICULTY_PRESETS: dict = {
+    "easy": {
+        "label": "EASY",
+        "description": "Relaxed pace, forgiving jumps",
+        "lives": 7,
+        "enemy_speed_mult": 0.6,
+        "enemy_fire_rate_mult": 0.6,
+        "obstacle_density_mult": 0.5,
+        "powerup_frequency_mult": 1.5,
+        "platform_width_mult": 1.3,
+        "gap_size_mult": 0.7,
+        "enemy_spawn_mult": 0.5,
+        "score_mult": 0.8,
+        "color": (80, 200, 120),
+    },
+    "normal": {
+        "label": "NORMAL",
+        "description": "Balanced challenge for all",
+        "lives": 5,
+        "enemy_speed_mult": 1.0,
+        "enemy_fire_rate_mult": 1.0,
+        "obstacle_density_mult": 1.0,
+        "powerup_frequency_mult": 1.0,
+        "platform_width_mult": 1.0,
+        "gap_size_mult": 1.0,
+        "enemy_spawn_mult": 1.0,
+        "score_mult": 1.0,
+        "color": (100, 180, 255),
+    },
+    "hard": {
+        "label": "HARD",
+        "description": "Tight platforms, aggressive foes",
+        "lives": 3,
+        "enemy_speed_mult": 1.4,
+        "enemy_fire_rate_mult": 1.4,
+        "obstacle_density_mult": 1.5,
+        "powerup_frequency_mult": 0.6,
+        "platform_width_mult": 0.75,
+        "gap_size_mult": 1.3,
+        "enemy_spawn_mult": 1.5,
+        "score_mult": 1.5,
+        "color": (255, 140, 60),
+    },
+    "insane": {
+        "label": "INSANE",
+        "description": "One life. No mercy.",
+        "lives": 1,
+        "enemy_speed_mult": 1.8,
+        "enemy_fire_rate_mult": 1.8,
+        "obstacle_density_mult": 2.0,
+        "powerup_frequency_mult": 0.3,
+        "platform_width_mult": 0.6,
+        "gap_size_mult": 1.5,
+        "enemy_spawn_mult": 2.0,
+        "score_mult": 3.0,
+        "color": (255, 40, 60),
+    },
+}
+DIFFICULTY_ORDER: list = ["easy", "normal", "hard", "insane"]
+DEFAULT_DIFFICULTY: str = "normal"

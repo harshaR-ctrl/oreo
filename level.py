@@ -2,9 +2,8 @@
 level.py — Endless procedural level generator (horizontal side-scroller).
 
 Generates platform chunks as the player progresses rightward. Old chunks
-behind the player are cleaned up to save memory. Difficulty gradually
-increases with distance traveled. There is no end — the game runs until
-the player dies.
+behind the player are cleaned up to save memory. Features difficulty-aware
+generation and platform decorations (grass, moss, coins with 3D spin).
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ from settings import (
     COL_PLATFORM, COL_PLATFORM_TOP, COL_PLATFORM_BOUNCE,
     COL_PLATFORM_CRUMBLE, COL_GOAL_PLATFORM, COL_COIN,
     ENEMY_WIDTH, ENEMY_HEIGHT, OBSTACLE_WIDTH, OBSTACLE_HEIGHT,
+    DIFFICULTY_PRESETS, DEFAULT_DIFFICULTY,
 )
 from enemies import Dasher, Marksman, Hybrid
 from obstacles import Obstacle
@@ -33,7 +33,7 @@ CLEANUP_BEHIND: float = INTERNAL_WIDTH * 1.5   # remove stuff >1.5 screens behin
 
 
 class Platform:
-    """A single platform in the level."""
+    """A single platform in the level with decorative grass."""
 
     def __init__(
         self,
@@ -49,6 +49,14 @@ class Platform:
         self.crumble_delay: float = 0.35
         self.crumbling: bool = False
         self.shake_offset: float = 0.0
+
+        # Decorative grass tufts
+        self.grass: list[tuple[int, int, int]] = []  # (offset_x, height, color_variant)
+        if platform_type == "normal":
+            for gx in range(3, w - 3, random.randint(5, 10)):
+                gh = random.randint(2, 4)
+                gv = random.randint(0, 2)
+                self.grass.append((gx, gh, gv))
 
     def start_crumble(self) -> None:
         if not self.crumbling:
@@ -85,14 +93,36 @@ class Platform:
         # Cull off-screen
         if sx > INTERNAL_WIDTH + 20 or sx + self.rect.width < -20:
             return
-        pygame.draw.rect(surface, self.get_color(),
+
+        # Main body with slight gradient
+        body_color = self.get_color()
+        top_color = self.get_top_color()
+
+        pygame.draw.rect(surface, body_color,
                          (sx, sy, self.rect.width, self.rect.height))
-        pygame.draw.rect(surface, self.get_top_color(),
-                         (sx, sy, self.rect.width, 1))
+        # Top highlight (2px for better visibility)
+        pygame.draw.rect(surface, top_color,
+                         (sx, sy, self.rect.width, 2))
+
+        # Bottom edge shadow
+        shadow_color = (max(0, body_color[0] - 15), max(0, body_color[1] - 15), max(0, body_color[2] - 15))
+        pygame.draw.rect(surface, shadow_color,
+                         (sx, sy + self.rect.height - 1, self.rect.width, 1))
+
+        # Decorative grass tufts
+        for gx, gh, gv in self.grass:
+            grass_colors = [(40, 80, 35), (50, 90, 40), (35, 70, 30)]
+            gc = grass_colors[gv % len(grass_colors)]
+            grass_x = sx + gx
+            grass_y = sy - 1
+            pygame.draw.line(surface, gc, (grass_x, grass_y), (grass_x, grass_y - gh), 1)
+            if gh > 2:
+                # Small leaf
+                pygame.draw.line(surface, gc, (grass_x, grass_y - gh + 1), (grass_x + 1, grass_y - gh), 1)
 
 
 class Coin:
-    """A collectible coin on a platform."""
+    """A collectible coin with 3D spinning animation."""
 
     def __init__(self, x: int, y: int) -> None:
         self.x: float = float(x)
@@ -100,6 +130,7 @@ class Coin:
         self.size: int = COIN_SIZE
         self.collected: bool = False
         self.bob_timer: float = random.uniform(0, math.pi * 2)
+        self.spin_timer: float = random.uniform(0, math.pi * 2)
 
     @property
     def rect(self) -> pygame.Rect:
@@ -111,6 +142,7 @@ class Coin:
 
     def update(self, dt: float) -> None:
         self.bob_timer += dt * 3.0
+        self.spin_timer += dt * 4.0
 
     def draw(self, surface: pygame.Surface, cam_x: float, cam_y: float) -> None:
         if self.collected:
@@ -120,14 +152,25 @@ class Coin:
         sy = int(self.y - cam_y + bob_y)
         if sx > INTERNAL_WIDTH + 20 or sx < -20:
             return
+
+        # 3D spin effect - width changes with sin()
+        spin_factor = abs(math.sin(self.spin_timer))
+        effective_w = max(1, int((self.size // 2 + 1) * spin_factor))
+
+        # Outer glow
         pygame.draw.circle(surface, (255, 200, 40), (sx, sy), self.size // 2 + 1)
-        pygame.draw.circle(surface, COL_COIN, (sx, sy), self.size // 2)
-        pygame.draw.circle(surface, (255, 255, 200),
-                           (sx - 1, sy - 1), max(1, self.size // 4))
+        # Coin body (ellipse for 3D effect)
+        coin_rect = pygame.Rect(sx - effective_w, sy - self.size // 2, effective_w * 2, self.size)
+        pygame.draw.ellipse(surface, COL_COIN, coin_rect)
+        # Highlight
+        if effective_w > 1:
+            pygame.draw.ellipse(surface, (255, 255, 200),
+                              (sx - effective_w + 1, sy - self.size // 2 + 1,
+                               max(1, effective_w), max(1, self.size - 2)))
 
 
 class LevelGenerator:
-    """Endless side-scrolling level: generates chunks as the player moves."""
+    """Endless side-scrolling level with difficulty-aware generation."""
 
     def __init__(self) -> None:
         self.platforms: list[Platform] = []
@@ -140,11 +183,20 @@ class LevelGenerator:
         self.level_number: int = 0
         self.seed: int = 0
 
+        # Difficulty settings
+        self.difficulty_name: str = DEFAULT_DIFFICULTY
+        self.difficulty_config: dict = DIFFICULTY_PRESETS[DEFAULT_DIFFICULTY]
+
         # Endless generation state
         self._frontier_x: float = 0.0      # rightmost edge of generated content
         self._frontier_y: float = GROUND_Y  # last platform Y for continuity
         self._distance: float = 0.0        # total distance generated (for difficulty)
         self._platforms_generated: int = 0  # counter for spawn spacing
+
+    def set_difficulty(self, difficulty_name: str) -> None:
+        """Set difficulty preset for level generation."""
+        self.difficulty_name = difficulty_name
+        self.difficulty_config = DIFFICULTY_PRESETS.get(difficulty_name, DIFFICULTY_PRESETS[DEFAULT_DIFFICULTY])
 
     @property
     def difficulty(self) -> float:
@@ -178,6 +230,8 @@ class LevelGenerator:
     def _generate_ahead(self, up_to_x: float) -> None:
         """Generate platforms until _frontier_x >= up_to_x."""
         difficulty = self.difficulty
+        cfg = self.difficulty_config
+
         bounce_chance = 0.1 + difficulty * 0.1
         crumble_chance = 0.03 + difficulty * 0.1
         enemy_classes = [Dasher, Marksman, Hybrid]
@@ -186,10 +240,10 @@ class LevelGenerator:
         y_max = GROUND_Y
 
         while self._frontier_x < up_to_x:
-            # Horizontal gap — always progresses right
+            # Horizontal gap — scale with difficulty config
             gap_x = random.randint(
-                int(MIN_GAP_X + difficulty * 3),
-                int(MAX_GAP_X + difficulty * 5),
+                int((MIN_GAP_X + difficulty * 3) * cfg["gap_size_mult"]),
+                int((MAX_GAP_X + difficulty * 5) * cfg["gap_size_mult"]),
             )
 
             # Vertical variation
@@ -208,13 +262,15 @@ class LevelGenerator:
             else:
                 ptype = "normal"
 
-            # Platform width
+            # Platform width — scale with difficulty config
             if ptype == "crumble":
-                width = random.randint(35, 80) # Short, snappy width for brown platforms
+                width = random.randint(35, 80)
             else:
+                base_min = max(35, int(PLATFORM_MIN_WIDTH - difficulty * 4))
+                base_max = max(50, int(PLATFORM_MAX_WIDTH - difficulty * 6))
                 width = random.randint(
-                    max(35, int(PLATFORM_MIN_WIDTH - difficulty * 4)),
-                    max(50, int(PLATFORM_MAX_WIDTH - difficulty * 6)),
+                    int(base_min * cfg["platform_width_mult"]),
+                    int(base_max * cfg["platform_width_mult"]),
                 )
 
             plat = Platform(int(new_x), int(new_y), width, PLATFORM_HEIGHT, ptype)
@@ -225,8 +281,8 @@ class LevelGenerator:
             if random.random() < 0.4 and ptype != "crumble":
                 self.coins.append(Coin(int(new_x + width // 2), int(new_y - 10)))
 
-            # Enemy spawn logic (scales with difficulty)
-            enemy_chance = 0.35 + difficulty * 0.30  # 35% to 65% chance
+            # Enemy spawn logic (scales with difficulty config)
+            enemy_chance = (0.35 + difficulty * 0.30) * cfg["enemy_spawn_mult"]
             if (ptype == "normal"
                     and self._platforms_generated > 3
                     and random.random() < enemy_chance):
@@ -235,21 +291,22 @@ class LevelGenerator:
                 ecls = random.choice(enemy_classes)
                 self.enemies.append(ecls(ex, ey))
 
-            # Obstacle logic
+            # Obstacle logic (scales with difficulty config)
             if ptype == "normal" and width > 120 and self._platforms_generated > 2:
-                # Up to 2 obstacles on wide platforms
-                if random.random() < 0.4 + difficulty * 0.2:
+                obs_chance = (0.4 + difficulty * 0.2) * cfg["obstacle_density_mult"]
+                if random.random() < obs_chance:
                     ox = int(new_x) + random.randint(15, 30)
                     oy = int(new_y) - OBSTACLE_HEIGHT
                     self.obstacles.append(Obstacle(ox, oy))
                 
-                if width > 200 and random.random() < 0.4 + difficulty * 0.2:
+                if width > 200 and random.random() < obs_chance:
                     ox = int(new_x) + width - random.randint(15 + OBSTACLE_WIDTH, 30 + OBSTACLE_WIDTH)
                     oy = int(new_y) - OBSTACLE_HEIGHT
                     self.obstacles.append(Obstacle(ox, oy))
 
-            # Loot every ~5th platform
-            if self._platforms_generated % 5 == 0:
+            # Loot frequency (scales with difficulty config)
+            loot_interval = max(3, int(5 / cfg["powerup_frequency_mult"]))
+            if self._platforms_generated % loot_interval == 0:
                 px = int(new_x + width // 2)
                 py = int(new_y - 12)
                 self.powerups.append(spawn_random_loot(px, py))
